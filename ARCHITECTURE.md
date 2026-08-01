@@ -28,6 +28,61 @@ A **React Native (Expo)** mobile app that talks to **any number of Hermes Agent 
 
 ---
 
+## Engineering principles (non-negotiable)
+
+Three rules govern every decision in this codebase. If a choice violates one,
+the choice is wrong.
+
+### 1. KISS — Keep It Simple, Stupid
+
+- The simplest thing that works ships first. No speculative abstractions, no
+  "we might need this later" layers, no over-engineered state management.
+- One way to do each thing. If two code paths do the same job, delete one.
+- Default to boring, well-trodden solutions (fetch, zustand, flat files) over
+  clever ones. Novelty only where it buys the user something real.
+- When a feature could be done two ways and one is simpler — do that one, and
+  say so in the PR. Complexity is a debt that accrues interest; never take it
+  on without a concrete, current need.
+- Guardrail: if a new abstraction doesn't remove code from the codebase within
+  a week of landing, it gets removed.
+
+### 2. TDD — test-driven development
+
+Red → green → refactor. Test the *behavior*, not the implementation.
+
+- **Write the failing test first** for every feature, bug fix, and edge case.
+  No test = the work isn't done.
+- Unit tests cover the pure logic: SSE parser, sentence buffer, endpoint
+  validation, event normalization, interrupt semantics.
+- Hooks and components get behavioral tests (React Testing Library) with fake
+  streams — never hit the real network in tests.
+- The API layer is tested against mocked fetch/SSE contracts that mirror the
+  documented API server shape (the doc's endpoint table is the source of
+  truth).
+- One e2e smoke test (Maestro) proves the real loop works against a live
+  Hermes — run locally before release, not in CI.
+- **Coverage floor: 80% on `src/`.** CI fails below it.
+
+### 3. Very modular
+
+- **One concern per module.** A file does one thing and exposes one small
+  surface. If a file's purpose needs an "and" to describe, split it.
+- **Strict dependency direction:** `app/` → `hooks/` → `stores/` + `api/` →
+  `types/`. UI never imports `api/` directly; stores never import components;
+  `types/` imports nothing.
+- **Provider implementations are swappable modules.** ASR, TTS, SSE, and the
+  API client are each behind a small interface (see Voice Profile and the
+  `makeClient` factory). Adding a provider = adding a module, not editing the
+  pipeline.
+- **No god files.** The SSE parser, the chat store, and the endpoint manager
+  each get their own module from day one — refactoring them later is how
+  modular code dies.
+- **Feature isolation:** endpoints, voice, and chat are separate store slices
+  with separate test files. One feature's change never breaks another's
+  tests.
+
+---
+
 ## Repository layout
 
 ```
@@ -250,15 +305,24 @@ public, put it behind Caddy with TLS and consider an IP allowlist.
 
 ---
 
-## Testing strategy
+## Testing strategy (TDD-first)
 
-| Layer | Tool | Focus |
-|-------|------|-------|
-| API layer | Jest + mocked fetch/SSE | Endpoint payloads, auth header, error mapping |
-| SSE parser | Jest | Event framing, partial chunks, reconnect |
-| Hooks | Jest + Testing Library | `useChat` lifecycle with fake streams |
-| Components | React Native Testing Library | Bubble render, ToolCallCard states |
-| E2E (optional) | Maestro | Send → stream → render against a live Hermes |
+Tests are written **before** the code they verify — see Engineering
+principles §2. The pyramid below is the shape of the suite; the rule is that
+every change lands with its test first.
+
+| Layer | Tool | Focus | Written when |
+|-------|------|-------|--------------|
+| Pure logic | Jest | SSE parser, sentenceBuffer, endpoint validation, event normalization, interrupt semantics | First — pure functions, no mocks |
+| API layer | Jest + mocked fetch/SSE | `makeClient` payloads, auth header, error mapping (mirror the endpoint table above) | Before wiring the UI |
+| Hooks | Jest + Testing Library | `useChat`, `useVoiceChat` lifecycles with fake streams | Before the screens |
+| Stores | Jest | endpoints/activeEndpoint/voiceProfile/chat state transitions | Before the screens |
+| Components | React Native Testing Library | Bubble render, ToolCallCard states, MicButton interactions | Alongside the component |
+| E2E (one smoke) | Maestro | Send → stream → render against a live Hermes | Before release, locally |
+
+**Coverage floor: 80% on `src/`** — CI fails below it. Tests never hit the
+real network; every external call is a contract-mocked fake. The single
+exception is the local Maestro smoke test.
 
 ---
 
@@ -266,11 +330,17 @@ public, put it behind Caddy with TLS and consider an IP allowlist.
 
 ```yaml
 # On every PR:
-# - eslint, tsc, jest
+# - eslint
+# - tsc --noEmit
+# - jest --coverage (fail under 80% on src/)
 # On main:
 # - EAS build (Android preview/staging)
 # - optional: EAS submit to Play Store (internal track)
 ```
+
+CI enforces the TDD floor mechanically: no PR merges with coverage below the
+threshold, and the suite runs green on every commit. The Maestro smoke test
+stays local (needs a live Hermes), never in CI.
 
 ---
 
@@ -420,15 +490,18 @@ ships when the core loop — send, stream, render, resume — is rock solid.
 
 ## Quick start checklist
 
+TDD-first from commit one: each item lands with its test written before the
+implementation (Engineering principles §2).
+
 - [ ] Enable API server on the Hermes host (`.env` + gateway restart), verify with `curl /v1/capabilities`
-- [ ] Scaffold Expo app (`npx create-expo-app hermes-mobile`)
-- [ ] `src/api/client.ts` — `makeClient(baseUrl, key)` factory: base URL + bearer auth + typed errors
-- [ ] `src/api/sse.ts` — SSE client + event normalizer
+- [ ] Scaffold Expo app (`npx create-expo-app hermes-mobile`) + jest/ts/eslint config
+- [ ] Test `sse.ts` parser first (framing, partial chunks) → then implement
+- [ ] Test `makeClient(baseUrl, key)` contract (auth header, errors) → then implement
 - [ ] Endpoint store + add-endpoint screen: URL + API key → validate via `/v1/capabilities` → SecureStore
 - [ ] Endpoint manager screen: list, switch, remove
-- [ ] Chat screen: send → `POST /v1/runs` → stream events → render
+- [ ] Test `useChat` lifecycle with fake streams → then Chat screen: send → `POST /v1/runs` → stream → render
 - [ ] ToolCallCard components for `tool.started` / `tool.completed`
 - [ ] Session list screen (`GET /api/sessions`) + resume via `chat/stream`
 - [ ] Voice Profile screen: ASR/TTS provider + keys → SecureStore
-- [ ] Voice v1: mic → on-device whisper ASR → run → sentence-TTS (Edge) → play → interrupt
-- [ ] First real commit
+- [ ] Voice v1 (test sentenceBuffer + interrupt first): mic → on-device whisper ASR → run → sentence-TTS (Edge) → play → interrupt
+- [ ] First real commit — suite green, coverage ≥ 80%
