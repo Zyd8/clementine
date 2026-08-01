@@ -8,7 +8,7 @@ A **React Native (Expo)** mobile app that talks to **any number of Hermes Agent 
                     ┌──────────────────────────────────────────────┐
                     │            Hermes Mobile (Expo / RN)          │
                     │  Chat UI · Tool-progress feed · Sessions     │
-                    │  Endpoint manager (many instances)           │
+                    │  Endpoint manager · Voice mode (ASR/TTS)     │
                     └───────┬──────────────┬──────────────┬────────┘
                             │              │              │
               HTTPS+SSE     │              │              │     HTTPS+SSE
@@ -34,7 +34,8 @@ A **React Native (Expo)** mobile app that talks to **any number of Hermes Agent 
 hermes-mobile/
 ├── app/                        # Expo Router file-based routes
 │   ├── (auth)/
-│   │   └── setup.tsx           # Add endpoint: server URL + API key
+│   │   ├── setup.tsx           # Add endpoint: server URL + API key
+│   │   └── voice-profile.tsx   # Voice profile: ASR/TTS providers + keys
 │   ├── (tabs)/
 │   │   ├── index.tsx           # Chat screen (main, active endpoint)
 │   │   ├── endpoints.tsx       # Endpoint manager — list/add/remove instances
@@ -50,21 +51,29 @@ hermes-mobile/
 │   │   ├── runs.ts             # Runs API: create, events, stop, approval
 │   │   ├── sessions.ts         # Sessions API: list, create, fork, messages
 │   │   └── jobs.ts             # Jobs API: list, create, pause, run
+│   ├── voice/                  # Voice pipeline (device-local, BYO keys)
+│   │   ├── asr.ts              # Speech-to-text providers (whisper.cpp, Groq, Deepgram, OpenAI)
+│   │   ├── tts.ts              # Text-to-speech providers (Edge free, ElevenLabs, OpenAI, MiniMax)
+│   │   ├── sentenceBuffer.ts   # Chunk agent text at sentence boundaries for TTS
+│   │   └── interrupt.ts        # Stop TTS + cancel run semantics
 │   ├── components/
-│   │   ├── ui/                 # Primitives (Bubble, Input, Button)
-│   │   └── features/           # ToolCallCard, RunProgress, SessionRow
+│   │   ├── ui/                 # Primitives (Bubble, Input, Button, MicButton)
+│   │   └── features/           # ToolCallCard, RunProgress, SessionRow, VoiceWaveform
 │   ├── hooks/
 │   │   ├── useChat.ts          # Turn lifecycle: create run → subscribe SSE
+│   │   ├── useVoiceChat.ts     # Voice turn: ASR → run → sentence-TTS → interrupt
 │   │   ├── useSessions.ts      # Session list + resume
 │   │   └── useCapabilities.ts  # Feature detection via /v1/capabilities
 │   ├── stores/
 │   │   ├── endpoints.ts        # Saved instances (SecureStore-backed): id, name, url, key
 │   │   ├── activeEndpoint.ts   # Currently selected endpoint
+│   │   ├── voiceProfile.ts     # ASR/TTS provider + key per user (SecureStore-backed)
 │   │   └── chat.ts             # In-flight run state, message queue
 │   ├── types/
 │   │   ├── api.ts              # Envelope types mirroring API server
 │   │   ├── events.ts           # SSE event types (assistant.delta, tool.*)
-│   │   └── endpoints.ts        # Endpoint model + validation
+│   │   ├── endpoints.ts        # Endpoint model + validation
+│   │   └── voice.ts            # ASR/TTS provider config + session types
 │   ├── utils/
 │   └── constants/
 ├── assets/
@@ -194,6 +203,8 @@ User picks endpoint (endpoints store) + taps send
 | `expo-secure-store` | Per-endpoint API keys + server URLs |
 | `react-hook-form` + `zod` | Endpoint form + runtime validation of event payloads |
 | `expo-notifications` | Optional: local notification when a long run completes in background |
+| `expo-av` (or `expo-audio`) | Mic capture + audio playback for voice mode |
+| `whisper.cpp` RN binding (or WASM) | On-device free ASR (whisper.cpp) |
 
 ### Folder rules
 
@@ -309,13 +320,95 @@ modifies another machine — it only talks to it).
 
 ---
 
+## Voice mode (the differentiator)
+
+Real-time spoken conversation with any connected Hermes instance. The agent
+"thinks" with its own model; the phone owns the speech pipeline with the
+user's own keys.
+
+**The core split:**
+
+```
+  Listen  → ASR/transcriber   → USER's key (on-device)
+  Think   → Hermes agent      → the endpoint's own model (no key needed —
+                                the instance already has one; the app never
+                                calls an LLM directly, that would bypass tools)
+  Speak   → TTS               → USER's key (on-device)
+```
+
+The phone runs the voice pipeline; the Hermes instance only does agent
+reasoning + tools. Keys live on the user's device — consistent with the
+decentralized BYO-endpoint model. Voice works against ANY Hermes instance,
+including other people's, with nothing installed on their side.
+
+### Providers (free-first, BYO upgrade)
+
+| Stage | Free default (no key) | BYO upgrade |
+|-------|----------------------|-------------|
+| ASR | On-device whisper.cpp (private, offline-capable) | Groq Whisper / Deepgram streaming / OpenAI Whisper |
+| TTS | Edge TTS (Microsoft, no key) | ElevenLabs / OpenAI / MiniMax |
+
+First-run experience = working voice in 30 seconds, zero keys. Power users
+drop in their own providers via the Voice Profile screen.
+
+### Turn flow (half-duplex v1)
+
+```
+User holds mic button
+  → audio streams to ASR provider (their key)
+    → live transcript appears as they speak
+  → transcript → POST /v1/runs on the active endpoint
+    → SSE events stream back (tool calls visible in the feed!)
+      → agent text accumulates → sentenceBuffer cuts at sentence boundaries
+        → each sentence → TTS provider (their key)
+          → audio plays; next sentence synthesizes while current plays
+  → tap = interrupt: stop TTS playback + POST /v1/runs/{id}/stop
+```
+
+### Why sentence-chunked TTS
+
+Don't wait for the whole reply (feels dead) and don't synthesize
+half-sentences (sounds chopped). Buffer agent tokens, cut at `.` `!` `?`
+newline, synthesize ahead of playback. That pipeline is what produces the
+~1-2s first-audio feel.
+
+### Tool feed stays visible during voice
+
+The voice turn uses the same Runs API + SSE as text chat, so users SEE the
+agent working (terminal, files, web) while hearing the reply. No other
+voice-agent client does this — it's the app's differentiator and directly
+showcases Hermes's agentic core.
+
+### Voice Profile (separate from endpoints)
+
+Voice keys are the USER's; endpoints are the AGENTS'. Two stores:
+
+```ts
+type VoiceProfile = {
+  asr: { provider: 'whisper_cpp' | 'groq' | 'deepgram' | 'openai'; apiKey?: string };
+  tts: { provider: 'edge' | 'elevenlabs' | 'openai' | 'minimax'; apiKey?: string; voiceId?: string };
+  interruptBehavior: 'stop_speech_only' | 'stop_speech_and_run';
+};
+```
+
+Stored in SecureStore, edited in the Voice Profile screen. Switching ASR/TTS
+providers never touches endpoints or sessions.
+
+### v2 (post-core)
+
+- **Full-duplex**: on-device VAD, barge-in, hands-free continuous conversation
+- **Voice cloning** via BYO ElevenLabs
+- **Voice-notes-as-messages**: recorded audio turns stored alongside transcripts
+- **Background voice session**: app in background, speak, get spoken replies
+
+---
+
 ## When to add complexity
 
 | Need | Add |
 |------|-----|
 | Run completes while app closed | `expo-notifications` + jobs/webhook, or poll `GET /v1/runs/{id}` on foreground |
 | QR-code connect (scan to add endpoint) | Generate a payload on the Hermes host (`hermes-mobile connect`) → encode `url|key` → camera scan fills the form |
-| Voice to Hermes | STT (whisper) → send text turn; TTS audio reply from agent |
 | Real push for long jobs | Hermes webhook → FCM relay (small server), not polling |
 | iPad / tablet layout | Responsive panes: endpoint list left, chat center, run feed right |
 | Sharing endpoints between your devices | Encrypted export/import (QR or file) of the endpoint blob — still on-device, no server |
@@ -336,4 +429,6 @@ ships when the core loop — send, stream, render, resume — is rock solid.
 - [ ] Chat screen: send → `POST /v1/runs` → stream events → render
 - [ ] ToolCallCard components for `tool.started` / `tool.completed`
 - [ ] Session list screen (`GET /api/sessions`) + resume via `chat/stream`
+- [ ] Voice Profile screen: ASR/TTS provider + keys → SecureStore
+- [ ] Voice v1: mic → on-device whisper ASR → run → sentence-TTS (Edge) → play → interrupt
 - [ ] First real commit
