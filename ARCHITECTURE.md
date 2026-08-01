@@ -50,7 +50,7 @@ it means every app-driven run shares that instance's API key, sessions,
 memory, and terminal access. A bug in the app, a bad test run, or an
 accidental prompt would act on the VPS agent as if it were the user —
 breaking the very setup that hosts the portfolio, cron jobs, and the other
-automations. So the VPS's `API_SERVER_KEY` is never given to the app, and
+automations. So the VPS's `CLEMENTINE_API_KEY` is never given to the app, and
 the VPS API server stays unreachable from the app's perspective.
 
 Instead, Clementine is pointed at a **local Hermes on the laptop**
@@ -61,8 +61,8 @@ Instead, Clementine is pointed at a **local Hermes on the laptop**
   `~/.hermes/.env` layout, independent of the VPS copy.
 - Its API server is enabled with its own generated key:
   ```
-  API_SERVER_ENABLED=true
-  API_SERVER_KEY=<openssl rand -hex 32>
+  CLEMENTINE_API_ENABLED=true
+  CLEMENTINE_API_KEY=<openssl rand -hex 32>
   ```
 - Laptop API server binds `127.0.0.1:8642`; the phone reaches it over LAN
   or Tailscale (see Networking & environment).
@@ -195,9 +195,9 @@ hermes-mobile/
 Enable once on the host running Hermes (`~/.hermes/.env`):
 
 ```
-API_SERVER_ENABLED=true
-API_SERVER_KEY=<long-random-secret>
-# API_SERVER_CORS_ORIGINS=...   # only for browser clients; native app ignores CORS
+CLEMENTINE_API_ENABLED=true
+CLEMENTINE_API_KEY=<long-random-secret>
+# CLEMENTINE_API_CORS_ORIGINS=...   # only for browser clients; native app ignores CORS
 ```
 
 Server listens on `http://127.0.0.1:8642` by default. The mobile app reaches it
@@ -225,7 +225,7 @@ over HTTPS via a reverse proxy (Caddy on the VPS) or Tailscale for dev.
 | `GET` | `/v1/profiles` | **New, not yet built on the Hermes host** — list independent profiles on this instance (id, name) |
 | `POST` | `/v1/profiles/{id}/token` | **New, not yet built** — exchange for that profile's scoped credential (see Profiles section) |
 
-Auth: `Authorization: Bearer $API_SERVER_KEY` on every request, except once a
+Auth: `Authorization: Bearer $CLEMENTINE_API_KEY` on every request, except once a
 profile-scoped credential has been issued (see Profiles section below), which
 replaces it for that profile's subsequent requests.
 
@@ -353,7 +353,7 @@ App launches → reads the stored connection (or sends user to setup if none)
 | Production (public, future) | `https://api.zyldjan.com` | Caddy reverse proxy + TLS — only ever fronts a dedicated instance, never zyd-vps's agent |
 
 **CORS note:** native mobile HTTP is not subject to browser CORS — no
-`API_SERVER_CORS_ORIGINS` needed for the app itself.
+`CLEMENTINE_API_CORS_ORIGINS` needed for the app itself.
 
 **Auth note:** the API server is bearer-auth only, single key. Anyone with the
 key has agent access (terminal!) — keep the key out of the repo, out of the
@@ -516,7 +516,7 @@ Setup is the first screen and the backbone of the whole design — there is
 type Connection = {
   name?: string;           // optional user label: "my VPS"
   baseUrl: string;         // https://api.zyldjan.com or tailscale IP
-  apiKey: string;          // that instance's API_SERVER_KEY
+  apiKey: string;          // that instance's CLEMENTINE_API_KEY
   connectedAt: number;
   lastUsedAt?: number;
 };
@@ -541,7 +541,7 @@ reconfiguring):
 ```
 You:    "How do I get my key?"
 App:    Show: on your Hermes machine, run:
-        grep API_SERVER_KEY ~/.hermes/.env
+        grep CLEMENTINE_API_KEY ~/.hermes/.env
         (and: hermes gateway setup → API server → on)
         Then paste URL + key here.
 ```
