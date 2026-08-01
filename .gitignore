@@ -1,2 +1,14 @@
+node_modules/
+.expo/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Local working documents, not shipped history (see CLAUDE.md)
 plan/
 design/
+
+# Secrets never enter the repo
+.env
+.env.local

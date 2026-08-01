@@ -49,7 +49,18 @@ upstream — see "Profiles are not built yet" below).
    ```
    CLEMENTINE_API_ENABLED=true
    CLEMENTINE_API_KEY=<generate with: openssl rand -hex 32>
+
+   # Mirror — Hermes reads these names, not ours (see note below).
+   API_SERVER_ENABLED=true
+   API_SERVER_KEY=<same value as CLEMENTINE_API_KEY>
    ```
+   `CLEMENTINE_API_KEY` is the canonical name for this project: it is what
+   the docs, the app's onboarding copy, and every runbook refer to. But the
+   Hermes gateway reads `API_SERVER_KEY` / `API_SERVER_ENABLED` from its own
+   source, so both must be present and identical or the API server will not
+   start. Drop the mirror lines only once upstream Hermes reads the
+   `CLEMENTINE_*` names.
+
    Never reuse a key from another instance or paste one in from chat history
    — generate fresh, on this host, right now.
 
@@ -63,12 +74,16 @@ upstream — see "Profiles are not built yet" below).
    ```
    Completion criterion: a 200 response with a JSON capabilities body. A 401
    means the key isn't loaded (gateway needs a real restart, not a reload); a
-   connection refused means `CLEMENTINE_API_ENABLED` didn't take.
+   connection refused usually means the mirrored `API_SERVER_ENABLED` is
+   missing — Hermes never reads `CLEMENTINE_API_ENABLED` directly.
 
-4. **Confirm the response shape** the app depends on: `runs`, `sse`,
-   `sessions`, `approval` flags present. If a `profiles` flag is present and
-   `true`, the host has the newer profiles endpoints; if absent, treat this
-   as a pre-profiles host (expected on most installs today — see below).
+4. **Confirm the response shape** the app depends on. Flags live under
+   `features` with snake_case names — `run_submission`, `run_events_sse`,
+   `session_chat`, `run_approval_response` — and the envelope identifies
+   itself as `object: "hermes.api_server.capabilities"`. A `features.profiles`
+   flag that is present and `true` means the host has the newer profiles
+   endpoints; absent means a pre-profiles host (every install today — see
+   below).
 
 5. **Establish phone reachability.** Pick exactly one path and confirm it
    works from the phone's network, not just localhost:
@@ -108,6 +123,10 @@ hand-roll them.
 2. **Reusing a key across hosts.** Each Hermes instance needs its own
    generated `CLEMENTINE_API_KEY` — copying one from another host's `.env`
    couples their security boundaries for no reason.
+
+2b. **Setting only `CLEMENTINE_API_KEY`.** The gateway will not see it. The
+   mirrored `API_SERVER_KEY` must carry the same value until upstream Hermes
+   reads the new name.
 3. **Testing only `127.0.0.1`.** A working `curl` from the host itself does
    not prove the phone can reach it — always verify from the actual network
    path (LAN IP, Tailscale IP, or public URL) before declaring success.
@@ -125,6 +144,8 @@ hand-roll them.
 
 - [ ] `CLEMENTINE_API_ENABLED=true` and a freshly generated `CLEMENTINE_API_KEY` are
       in `~/.hermes/.env`
+- [ ] `API_SERVER_ENABLED` / `API_SERVER_KEY` mirror them with identical
+      values (the names Hermes actually reads)
 - [ ] Gateway restarted after the `.env` edit
 - [ ] `curl .../v1/capabilities` with the bearer key returns 200 from
       `127.0.0.1`
