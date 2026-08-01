@@ -293,6 +293,66 @@ public, put it behind Caddy with TLS and consider an IP allowlist.
 
 ---
 
+## Observability & cost visibility
+
+Two things a distributed, BYO-endpoint app cannot get for free: knowing what a
+run costs before you fire it, and knowing why something broke on a device you
+can't SSH into. Both are core-loop concerns, not polish — build them in at
+scaffold time, not after screens exist.
+
+### Cost / usage visibility
+
+- `run.completed` and `run.failed` events already carry `usage?: TokenUsage`
+  (see Event shape above) — persist it instead of discarding it.
+- **Per-endpoint running total**: `stores/usage.ts` accumulates token usage
+  (and cost, if the endpoint reports pricing) keyed by `endpointId`, surfaced
+  as a badge in the chat header and a breakdown in the endpoint manager.
+- **Budget guard**: an optional per-endpoint soft limit, set in the endpoint's
+  settings. Crossing it surfaces a non-blocking warning before the next run
+  starts ("this endpoint has used ~140K tokens today") — it never blocks
+  silently, since the app has no authority to cap what the *server* actually
+  does.
+- Read-only reporting of numbers the server already emits — no new backend
+  contract required.
+
+### Crash / error telemetry
+
+- Add Sentry (`@sentry/react-native`) at scaffold time — retrofitting after
+  screens and error boundaries exist means re-touching every one of them.
+- **Redact secrets before they leave the device.** `apiKey` and `baseUrl`
+  values must never reach breadcrumbs or error context — add a `beforeSend`
+  scrub filter as part of initial setup, not a follow-up ticket.
+- Capture: unhandled JS exceptions, SSE stream errors (tagged by reason: auth,
+  network, parse), and voice pipeline provider failures (ASR/TTS 4xx/5xx) —
+  exactly the failures a remote, single-shared-key deployment otherwise makes
+  invisible.
+- No session content (chat text, tool output) goes to telemetry — metadata
+  and error shape only.
+
+---
+
+## Accessibility
+
+Streaming, live-updating content (token deltas, tool-call cards flipping
+between started/completed) is the hard case for screen readers — silence here
+isn't neutral, it makes the app unusable for a whole class of users.
+
+- **Chat bubbles**: mark in-flight assistant messages with
+  `accessibilityLiveRegion="polite"` so VoiceOver/TalkBack announce new text
+  without interrupting the user — but throttle announcements to sentence
+  boundaries (reuse `sentenceBuffer` from the voice pipeline), not every
+  token delta, or it becomes unusable noise.
+- **ToolCallCard**: expose state changes (`started` → `completed`) via
+  `accessibilityLabel`, not color/icon alone — a screen reader user needs to
+  hear "terminal: pip install — completed" not just see a checkmark flip.
+- **MicButton**: explicit `accessibilityState={{ selected: isRecording }}`
+  and a label that changes with state ("Start recording" / "Stop recording").
+- Add an `axe`/`accessibility-info` lint pass to the component test layer
+  (React Native Testing Library) alongside the existing behavioral tests —
+  this belongs in the Testing strategy table below, not bolted on later.
+
+---
+
 ## Error handling
 
 - **Network drop:** SSE auto-reconnect with backoff; on reconnect, poll run
@@ -318,6 +378,7 @@ every change lands with its test first.
 | Hooks | Jest + Testing Library | `useChat`, `useVoiceChat` lifecycles with fake streams | Before the screens |
 | Stores | Jest | endpoints/activeEndpoint/voiceProfile/chat state transitions | Before the screens |
 | Components | React Native Testing Library | Bubble render, ToolCallCard states, MicButton interactions | Alongside the component |
+| Accessibility | RNTL + `accessibility-info` assertions | Live-region announcements, ToolCallCard/MicButton labels and state (see Accessibility section) | Alongside the component |
 | E2E (one smoke) | Maestro | Send → stream → render against a live Hermes | Before release, locally |
 
 **Coverage floor: 80% on `src/`** — CI fails below it. Tests never hit the
@@ -478,7 +539,7 @@ providers never touches endpoints or sessions.
 | Need | Add |
 |------|-----|
 | Run completes while app closed | `expo-notifications` + jobs/webhook, or poll `GET /v1/runs/{id}` on foreground |
-| QR-code connect (scan to add endpoint) | Generate a payload on the Hermes host (`hermes-mobile connect`) → encode `url|key` → camera scan fills the form |
+| QR-code connect (scan to add endpoint) | **Blocked on a cross-repo dependency**: needs a `hermes-mobile connect` CLI command on the Hermes host repo that does not exist yet. Do not schedule this until that command is tracked/built upstream — generate the payload there (`url\|key`), camera scan fills the form on this side only. |
 | Real push for long jobs | Hermes webhook → FCM relay (small server), not polling |
 | iPad / tablet layout | Responsive panes: endpoint list left, chat center, run feed right |
 | Sharing endpoints between your devices | Encrypted export/import (QR or file) of the endpoint blob — still on-device, no server |
@@ -495,12 +556,14 @@ implementation (Engineering principles §2).
 
 - [ ] Enable API server on the Hermes host (`.env` + gateway restart), verify with `curl /v1/capabilities`
 - [ ] Scaffold Expo app (`npx create-expo-app hermes-mobile`) + jest/ts/eslint config
+- [ ] Wire up Sentry (`@sentry/react-native`) with a `beforeSend` redaction filter for `apiKey`/`baseUrl` — before any other screen lands
 - [ ] Test `sse.ts` parser first (framing, partial chunks) → then implement
 - [ ] Test `makeClient(baseUrl, key)` contract (auth header, errors) → then implement
 - [ ] Endpoint store + add-endpoint screen: URL + API key → validate via `/v1/capabilities` → SecureStore
 - [ ] Endpoint manager screen: list, switch, remove
 - [ ] Test `useChat` lifecycle with fake streams → then Chat screen: send → `POST /v1/runs` → stream → render
-- [ ] ToolCallCard components for `tool.started` / `tool.completed`
+- [ ] ToolCallCard components for `tool.started` / `tool.completed` — with accessibility labels for state changes from day one, not retrofitted
+- [ ] `stores/usage.ts`: persist `run.completed`/`run.failed` token usage per endpoint, surface as a chat-header badge
 - [ ] Session list screen (`GET /api/sessions`) + resume via `chat/stream`
 - [ ] Voice Profile screen: ASR/TTS provider + keys → SecureStore
 - [ ] Voice v1 (test sentenceBuffer + interrupt first): mic → on-device whisper ASR → run → sentence-TTS (Edge) → play → interrupt
