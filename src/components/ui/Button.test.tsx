@@ -17,7 +17,7 @@ describe('Button', () => {
   it('calls onPress when tapped', async () => {
     const onPress = jest.fn();
     await render(<Button label="CONNECT" onPress={onPress} />);
-    fireEvent.press(screen.getByRole('button'));
+    await fireEvent.press(screen.getByRole('button'));
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
@@ -46,14 +46,14 @@ describe('Button', () => {
   it('does not fire while busy — no double submit', async () => {
     const onPress = jest.fn();
     await render(<Button label="CONNECT" onPress={onPress} busy />);
-    fireEvent.press(screen.getByRole('button'));
+    await fireEvent.press(screen.getByRole('button'));
     expect(onPress).not.toHaveBeenCalled();
   });
 
   it('does not fire while disabled', async () => {
     const onPress = jest.fn();
     await render(<Button label="CONNECT" onPress={onPress} disabled />);
-    fireEvent.press(screen.getByRole('button'));
+    await fireEvent.press(screen.getByRole('button'));
     expect(onPress).not.toHaveBeenCalled();
   });
 

@@ -1,0 +1,18 @@
+data: {"event": "tool.started", "run_id": "run_LIVEFIXTURE", "timestamp": 1785626735.1928954, "tool": "terminal", "preview": "echo hello-clementine"}
+
+data: {"event": "tool.completed", "run_id": "run_LIVEFIXTURE", "timestamp": 1785626735.297624, "tool": "terminal", "duration": 0.102, "error": false}
+
+data: {"event": "message.delta", "run_id": "run_LIVEFIXTURE", "timestamp": 1785626736.038291, "delta": "\n\nhello"}
+
+data: {"event": "message.delta", "run_id": "run_LIVEFIXTURE", "timestamp": 1785626736.0656936, "delta": "-c"}
+
+data: {"event": "message.delta", "run_id": "run_LIVEFIXTURE", "timestamp": 1785626736.0660293, "delta": "lement"}
+
+data: {"event": "message.delta", "run_id": "run_LIVEFIXTURE", "timestamp": 1785626736.0663307, "delta": "ine"}
+
+data: {"event": "reasoning.available", "run_id": "run_LIVEFIXTURE", "timestamp": 1785626736.0680707, "text": "hello-clementine"}
+
+data: {"event": "run.completed", "run_id": "run_LIVEFIXTURE", "timestamp": 1785626736.0822272, "output": "hello-clementine", "usage": {"input_tokens": 32546, "output_tokens": 71, "total_tokens": 32617}}
+
+: stream closed
+

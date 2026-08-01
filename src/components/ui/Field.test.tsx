@@ -21,7 +21,7 @@ describe('Field', () => {
   it('reports typed text', async () => {
     const onChangeText = jest.fn();
     await render(<Field label="SERVER URL" value="" onChangeText={onChangeText} />);
-    fireEvent.changeText(screen.getByLabelText('SERVER URL'), 'http://host:8642');
+    await fireEvent.changeText(screen.getByLabelText('SERVER URL'), 'http://host:8642');
     expect(onChangeText).toHaveBeenCalledWith('http://host:8642');
   });
 
