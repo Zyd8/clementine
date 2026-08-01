@@ -41,6 +41,40 @@ Profiles section) — separate accounts/workspaces on the same host.
 
 ---
 
+## Reference deployment (dev) — LOCAL Hermes, never the VPS
+
+**Rule (hard): the app connects to a local Hermes instance running on the
+dev laptop — NOT to the VPS Hermes (zyd-vps).** The VPS instance is
+production infrastructure for this user's other services; wiring the app to
+it means every app-driven run shares that instance's API key, sessions,
+memory, and terminal access. A bug in the app, a bad test run, or an
+accidental prompt would act on the VPS agent as if it were the user —
+breaking the very setup that hosts the portfolio, cron jobs, and the other
+automations. So the VPS's `API_SERVER_KEY` is never given to the app, and
+the VPS API server stays unreachable from the app's perspective.
+
+Instead, Clementine is pointed at a **local Hermes on the laptop**
+(100.106.162.39, clezentine):
+
+- Same Hermes install method as the VPS (`curl -fsSL
+  https://hermes-agent.nousresearch.com/install.sh | bash`), same
+  `~/.hermes/.env` layout, independent of the VPS copy.
+- Its API server is enabled with its own generated key:
+  ```
+  API_SERVER_ENABLED=true
+  API_SERVER_KEY=<openssl rand -hex 32>
+  ```
+- Laptop API server binds `127.0.0.1:8642`; the phone reaches it over LAN
+  or Tailscale (see Networking & environment).
+- If the laptop instance breaks during app development, it's disposable —
+  nothing else depends on it. That's the whole point: the blast radius of
+  an experimental client is the laptop agent, not the VPS.
+
+Anything that would point the app at the VPS (its `.env` key, its Tailscale
+IP on port 8642, a Caddy route to it) is out of scope for this project.
+
+---
+
 ## Engineering principles (non-negotiable)
 
 Three rules govern every decision in this codebase. If a choice violates one,
@@ -313,10 +347,10 @@ App launches → reads the stored connection (or sends user to setup if none)
 
 | Environment | API base URL | Notes |
 |-------------|--------------|-------|
-| Dev (USB/emulator) | `http://10.0.2.2:8642` (Android emu) or LAN IP | API server on dev machine |
-| Dev (physical phone, LAN) | `http://<laptop-ip>:8642` | Same Wi-Fi |
-| Dev (phone → VPS, Tailscale) | `http://100.117.41.58:8642` | Tailscale on the phone |
-| Production (public) | `https://api.zyldjan.com` | Caddy reverse proxy + TLS on VPS |
+| Dev (USB/emulator) | `http://10.0.2.2:8642` (Android emu) or LAN IP | API server on dev laptop (the local Hermes) |
+| Dev (physical phone, LAN) | `http://<laptop-ip>:8642` | Same Wi-Fi, laptop = 100.106.162.39 |
+| Dev (phone → laptop, Tailscale) | `http://100.106.162.39:8642` | Tailscale on the phone, laptop Hermes |
+| Production (public, future) | `https://api.zyldjan.com` | Caddy reverse proxy + TLS — only ever fronts a dedicated instance, never zyd-vps's agent |
 
 **CORS note:** native mobile HTTP is not subject to browser CORS — no
 `API_SERVER_CORS_ORIGINS` needed for the app itself.
@@ -722,7 +756,7 @@ ships when the core loop — send, stream, render, resume — is rock solid.
 TDD-first from commit one: each item lands with its test written before the
 implementation (Engineering principles §2).
 
-- [ ] Enable API server on the Hermes host (`.env` + gateway restart), verify with `curl /v1/capabilities`
+- [ ] Enable API server on the **local laptop Hermes** (`.env` + gateway restart), verify with `curl /v1/capabilities` — never the VPS instance (see Reference deployment)
 - [ ] Scaffold Expo app (`npx create-expo-app hermes-mobile`) + jest/ts/eslint config
 - [ ] Wire up Sentry (`@sentry/react-native`) with a `beforeSend` redaction filter for `apiKey`/`baseUrl` — before any other screen lands
 - [ ] Test `sse.ts` parser first (framing, partial chunks) → then implement
