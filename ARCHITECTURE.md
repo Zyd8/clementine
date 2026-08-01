@@ -118,12 +118,14 @@ hermes-mobile/
 │   │   ├── useChat.ts          # Turn lifecycle: create run → subscribe SSE
 │   │   ├── useVoiceChat.ts     # Voice turn: ASR → run → sentence-TTS → interrupt
 │   │   ├── useSessions.ts      # Session list + resume
-│   │   └── useCapabilities.ts  # Feature detection via /v1/capabilities
+│   │   ├── useCapabilities.ts  # Feature detection via /v1/capabilities
+│   │   └── useTheme.ts         # Resolves settings store + system scheme → active Theme
 │   ├── stores/
 │   │   ├── endpoints.ts        # Saved instances (SecureStore-backed): id, name, url, key
 │   │   ├── activeEndpoint.ts   # Currently selected endpoint
 │   │   ├── voiceProfile.ts     # ASR/TTS provider + key per user (SecureStore-backed)
-│   │   └── chat.ts             # In-flight run state, message queue
+│   │   ├── chat.ts             # In-flight run state, message queue
+│   │   └── settings.ts         # App-level prefs (theme: 'system'|'light'|'dark'), AsyncStorage-backed
 │   ├── types/
 │   │   ├── api.ts              # Envelope types mirroring API server
 │   │   ├── events.ts           # SSE event types (assistant.delta, tool.*)
@@ -131,6 +133,7 @@ hermes-mobile/
 │   │   └── voice.ts            # ASR/TTS provider config + session types
 │   ├── utils/
 │   └── constants/
+│       └── theme.ts            # Light/dark design tokens: colors, spacing, typography
 ├── assets/
 ├── app.json
 ├── package.json
@@ -353,6 +356,33 @@ isn't neutral, it makes the app unusable for a whole class of users.
 
 ---
 
+## Theming — light & dark mode
+
+System-driven by default, manual override available. No external theming
+library — plain design tokens + a hook, consistent with the KISS principle.
+
+- **`src/constants/theme.ts`**: two plain objects, `lightTheme` and
+  `darkTheme` — colors, spacing, typography as flat token maps. No
+  component ever hardcodes a color; everything reads from these tokens.
+- **`src/stores/settings.ts`**: `theme: 'system' | 'light' | 'dark'`,
+  persisted via AsyncStorage (not a secret — no SecureStore needed, unlike
+  endpoints/voice keys).
+- **`src/hooks/useTheme.ts`**: the single entry point every themed component
+  calls. Resolves `settings.theme` — if `'system'`, falls back to React
+  Native's built-in `useColorScheme()`; if `'light'`/`'dark'`, that value
+  wins outright. Returns the active `Theme` token object.
+- **Live OS switching**: `useColorScheme()` already re-renders on system
+  appearance change (e.g. iOS's time-based dark mode) — no extra wiring
+  needed beyond consuming the hook.
+- **Toggle placement**: a simple light/dark/system control, not a whole new
+  screen — surfaced in an existing screen's header (e.g. endpoint manager)
+  rather than standing up a dedicated Settings tab for one control. Add a
+  real Settings screen only if a second setting shows up that needs one.
+- Built entirely on RN/Expo built-ins (`useColorScheme`, AsyncStorage) — no
+  new dependency required.
+
+---
+
 ## Error handling
 
 - **Network drop:** SSE auto-reconnect with backoff; on reconnect, poll run
@@ -379,6 +409,7 @@ every change lands with its test first.
 | Stores | Jest | endpoints/activeEndpoint/voiceProfile/chat state transitions | Before the screens |
 | Components | React Native Testing Library | Bubble render, ToolCallCard states, MicButton interactions | Alongside the component |
 | Accessibility | RNTL + `accessibility-info` assertions | Live-region announcements, ToolCallCard/MicButton labels and state (see Accessibility section) | Alongside the component |
+| Theming | Jest | `useTheme` resolution: system light, system dark, each manual override | Before components consume it |
 | E2E (one smoke) | Maestro | Send → stream → render against a live Hermes | Before release, locally |
 
 **Coverage floor: 80% on `src/`** — CI fails below it. Tests never hit the
