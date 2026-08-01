@@ -105,7 +105,8 @@ hermes-mobile/
 │   │   ├── sse.ts              # SSE stream parser (fetch + ReadableStream)
 │   │   ├── runs.ts             # Runs API: create, events, stop, approval
 │   │   ├── sessions.ts         # Sessions API: list, create, fork, messages
-│   │   └── jobs.ts             # Jobs API: list, create, pause, run
+│   │   ├── jobs.ts             # Jobs API: list, create, pause, run
+│   │   └── profiles.ts         # Profiles API: list, exchange for scoped credential
 │   ├── voice/                  # Voice pipeline (device-local, BYO keys)
 │   │   ├── asr.ts              # Speech-to-text providers (whisper.cpp, Groq, Deepgram, OpenAI)
 │   │   ├── tts.ts              # Text-to-speech providers (Edge free, ElevenLabs, OpenAI, MiniMax)
@@ -113,7 +114,7 @@ hermes-mobile/
 │   │   └── interrupt.ts        # Stop TTS + cancel run semantics
 │   ├── components/
 │   │   ├── ui/                 # Primitives (Bubble, Input, Button, MicButton)
-│   │   └── features/           # ToolCallCard, RunProgress, SessionRow, VoiceWaveform
+│   │   └── features/           # ToolCallCard, RunProgress, SessionRow, VoiceWaveform, ProfilePicker
 │   ├── hooks/
 │   │   ├── useChat.ts          # Turn lifecycle: create run → subscribe SSE
 │   │   ├── useVoiceChat.ts     # Voice turn: ASR → run → sentence-TTS → interrupt
@@ -124,12 +125,14 @@ hermes-mobile/
 │   │   ├── endpoints.ts        # Saved instances (SecureStore-backed): id, name, url, key
 │   │   ├── activeEndpoint.ts   # Currently selected endpoint
 │   │   ├── voiceProfile.ts     # ASR/TTS provider + key per user (SecureStore-backed)
-│   │   ├── chat.ts             # In-flight run state, message queue
+│   │   ├── chat.ts             # In-flight run state, message queue — keyed by (endpointId, profileId)
+│   │   ├── activeProfile.ts    # Selected profile + scoped credential per endpointId (SecureStore-backed)
 │   │   └── settings.ts         # App-level prefs (theme: 'system'|'light'|'dark'), AsyncStorage-backed
 │   ├── types/
 │   │   ├── api.ts              # Envelope types mirroring API server
 │   │   ├── events.ts           # SSE event types (assistant.delta, tool.*)
 │   │   ├── endpoints.ts        # Endpoint model + validation
+│   │   ├── profiles.ts         # Profile model + validation
 │   │   └── voice.ts            # ASR/TTS provider config + session types
 │   ├── utils/
 │   └── constants/
@@ -174,8 +177,16 @@ over HTTPS via a reverse proxy (Caddy on the VPS) or Tailscale for dev.
 | `GET` | `/api/jobs` | List scheduled jobs |
 | `POST` | `/api/jobs` | Create job (cron prompt, schedule) |
 | `GET` | `/v1/skills`, `/v1/toolsets` | Enumerate agent capabilities |
+| `GET` | `/v1/profiles` | **New, not yet built on the Hermes host** — list independent profiles on this instance (id, name) |
+| `POST` | `/v1/profiles/{id}/token` | **New, not yet built** — exchange for that profile's scoped credential (see Profiles section) |
 
-Auth: `Authorization: Bearer $API_SERVER_KEY` on every request.
+Auth: `Authorization: Bearer $API_SERVER_KEY` on every request, except once a
+profile-scoped credential has been issued (see Profiles section below), which
+replaces it for that profile's subsequent requests.
+
+`/v1/capabilities` needs a `profiles: boolean` flag added so the client can
+tell whether a given instance supports profiles at all before calling
+`/v1/profiles` — older/unpatched Hermes hosts won't have this endpoint.
 
 ---
 
@@ -236,18 +247,30 @@ agent observability view, not just a chat bubble list.
 5. **Credentials live only on-device, per endpoint.** API keys in SecureStore,
    scoped to their endpoint id. Never in AsyncStorage, never in the bundle,
    never uploaded anywhere.
+6. **Profiles are isolated units within an endpoint.** One instance can host
+   N independent profiles (own sessions, skills, memory, credentials) — see
+   Profiles section. Everything keyed by `endpointId` alone in earlier
+   sections of this doc becomes keyed by `(endpointId, profileId)` once
+   profiles exist for that instance.
 
 ### Data flow
 
 ```
-User picks endpoint (endpoints store) + taps send
-  → makeClient(endpoint.url, endpoint.key)
-    → useChat.createRun(sessionId, input)
-      → POST /v1/runs   (Authorization: Bearer <endpoint.key>)
-      → subscribe GET /v1/runs/{id}/events (SSE)
-        → normalize events → store (zustand, keyed by endpointId)
-          → ChatScreen renders bubbles + ToolCallCards
-            → run.completed → persist session, stop stream, allow next message
+User taps endpoint (endpoints store)
+  → GET /v1/capabilities → profiles: true?
+    → yes: GET /v1/profiles → show picker, dynamically populated for THIS
+            endpoint only (re-fetched fresh every time a different endpoint
+            is pressed — never cached across endpoints)
+      → user picks profile → POST /v1/profiles/{id}/token → profile credential
+    → no: skip picker, use endpoint.apiKey directly (backward compatible)
+  → taps send
+    → makeClient(endpoint.url, activeCredential)
+      → useChat.createRun(sessionId, input)
+        → POST /v1/runs   (Authorization: Bearer <activeCredential>)
+        → subscribe GET /v1/runs/{id}/events (SSE)
+          → normalize events → store (zustand, keyed by endpointId+profileId)
+            → ChatScreen renders bubbles + ToolCallCards
+              → run.completed → persist session, stop stream, allow next message
 ```
 
 ### Recommended packages
@@ -307,9 +330,12 @@ scaffold time, not after screens exist.
 
 - `run.completed` and `run.failed` events already carry `usage?: TokenUsage`
   (see Event shape above) — persist it instead of discarding it.
-- **Per-endpoint running total**: `stores/usage.ts` accumulates token usage
-  (and cost, if the endpoint reports pricing) keyed by `endpointId`, surfaced
-  as a badge in the chat header and a breakdown in the endpoint manager.
+- **Per-endpoint (and per-profile) running total**: `stores/usage.ts`
+  accumulates token usage (and cost, if the endpoint reports pricing) keyed
+  by `(endpointId, profileId)` — see the re-keying note in the Profiles
+  section — surfaced as a badge in the chat header and a breakdown in the
+  endpoint manager (broken out per profile, once an instance has more than
+  one).
 - **Budget guard**: an optional per-endpoint soft limit, set in the endpoint's
   settings. Crossing it surfaces a non-blocking warning before the next run
   starts ("this endpoint has used ~140K tokens today") — it never blocks
@@ -479,6 +505,99 @@ instant and stateless on the app side.
 **Removal** — deleting an endpoint wipes its key from SecureStore and its
 sessions from local state. The remote instance is untouched (the app never
 modifies another machine — it only talks to it).
+
+---
+
+## Profiles (per-instance accounts)
+
+**A single Hermes instance can host multiple independent profiles** —
+separate config, sessions, skills, memory, and credentials, all under one
+install. Think of them as accounts/workspace partitions on that one host.
+This is layered on top of the endpoint model above, not a replacement for
+it: `Endpoint` is still "which host," `Profile` is now "which account on
+that host."
+
+**This requires new backend contract that doesn't exist yet** (`GET
+/v1/profiles`, `POST /v1/profiles/{id}/token` — see Backend contract table).
+Treat this section as a spec to build against once that lands on the Hermes
+host side, not something the client can ship standalone.
+
+### Profile model
+
+```ts
+type Profile = {
+  id: string;          // reported by the instance, not a local uuid
+  name: string;         // display name, from the instance
+  description?: string;
+};
+```
+
+Profiles are **not** stored the way endpoints are — the list is always
+fetched live from the instance (`GET /v1/profiles`), never cached across
+app sessions, since it reflects that host's current state, not something
+the phone owns. Only the **active** profile selection persists locally:
+
+```ts
+// stores/activeProfile.ts — one entry per endpointId
+type ActiveProfile = {
+  endpointId: string;
+  profileId: string;
+  credential: string;   // profile-scoped token from /v1/profiles/{id}/token
+  selectedAt: number;
+};
+```
+
+Stored in SecureStore, keyed by `endpointId` — same trust tier as the
+endpoint's own API key, since a profile credential is itself agent access.
+
+### Dynamic population — the actual ask
+
+The profile list is fetched **fresh, per endpoint, at the moment the user
+presses that specific endpoint** — never pre-fetched for all endpoints, never
+shown from a stale cache:
+
+1. User taps an endpoint in the endpoint manager.
+2. App checks `/v1/capabilities` for that endpoint — `profiles: true`?
+   - **No** (older/unpatched host, or a host with no profiles feature at
+     all): skip straight to chat using `endpoint.apiKey`, exactly like
+     today. Zero behavior change for single-profile instances.
+   - **Yes**: call `GET /v1/profiles` against *that instance* right then —
+     the list shown is whatever that host currently reports, which can
+     differ completely from the last endpoint's list.
+3. User picks a profile → `POST /v1/profiles/{id}/token` → store the
+   returned credential in `activeProfile` for that `endpointId` → open chat.
+4. If the instance only reports one profile, still show it (don't silently
+   auto-select) — the user should always know which account they're in,
+   since sessions/memory differ per profile.
+
+### Re-keying existing stores
+
+Everything that was keyed by `endpointId` alone in earlier sections of this
+doc — `stores/chat.ts`, `stores/usage.ts` (Observability & cost visibility),
+session lists (Sessions phase) — becomes keyed by the composite
+`(endpointId, profileId)` once an instance has profiles. For instances
+without profiles, treat it as `(endpointId, null)` so the same store shape
+covers both cases without a separate code path.
+
+### Switching profiles vs. switching endpoints
+
+Switching endpoints is a full context switch (different host entirely).
+Switching profiles *within* the same endpoint should feel lighter — same
+host, same connection health, just a different account — but still fully
+isolated: no session, memory, or usage-total bleed between profiles on the
+same instance. Surface a profile switcher in the chat header (next to the
+endpoint name) so switching doesn't require going back to the endpoint list.
+
+### Open questions to resolve against the real backend contract once built
+
+- Does `/v1/profiles` require the endpoint's own `apiKey` to call (a
+  "gateway key" that only lists profiles), or is listing profiles itself
+  gated per-profile somehow? Assumed: endpoint key lists, profile token
+  gates everything else — confirm against the actual implementation.
+- Token lifetime/refresh for the profile-scoped credential — does it expire?
+  If so, `api/client.ts` needs a refresh-on-401 path that re-runs step 3
+  above rather than surfacing "re-enter API key" (which would be wrong here
+  — the endpoint key may still be fine, only the profile token expired).
 
 ---
 
