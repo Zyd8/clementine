@@ -1,30 +1,43 @@
 # Architecture: Hermes Mobile Client
 
-A **React Native (Expo)** mobile app that talks to **any number of Hermes Agent instances** over their built-in API servers. Real-time streaming conversation with live tool-call progress — terminal output, file edits, web searches, and agent reasoning rendered as they happen.
+A **React Native (Expo)** mobile app that talks to **one Hermes Agent
+instance** over its built-in API server. Real-time streaming conversation
+with live tool-call progress — terminal output, file edits, web searches,
+and agent reasoning rendered as they happen.
 
-**Design principle: decentralized, BYO-endpoint.** The app is a generic Hermes client. Each user points it at *their own* Hermes instance (server URL + API key) — there is no central server, no central auth, and the app never holds or proxies anyone else's instance. It is a remote control for the instances the user chooses to connect.
+**Design principle: single-instance, BYO connection.** The app is a generic
+Hermes client, scoped to one instance at a time. The user points it at
+*their own* Hermes instance (server URL + API key) — there is no central
+server, no central auth, and the app never holds or proxies anyone else's
+instance. **Multiple simultaneous instances are explicitly out of scope for
+now** (deferred — see "When to add complexity"); within that one instance,
+the app *does* support switching between multiple **profiles** (see
+Profiles section) — separate accounts/workspaces on the same host.
 
 ```
                     ┌──────────────────────────────────────────────┐
                     │            Hermes Mobile (Expo / RN)          │
                     │  Chat UI · Tool-progress feed · Sessions     │
-                    │  Endpoint manager · Voice mode (ASR/TTS)     │
-                    └───────┬──────────────┬──────────────┬────────┘
-                            │              │              │
-              HTTPS+SSE     │              │              │     HTTPS+SSE
-              Bearer key A  │              │  Bearer key B│     Bearer key C
-                    ┌───────▼──────┐ ┌──────▼───────┐ ┌─────▼─────────┐
-                    │ Hermes #1    │ │ Hermes #2    │ │ Hermes #3     │
-                    │ (own VPS)    │ │ (laptop)     │ │ (friend's box)│
-                    │ API server   │ │ API server   │ │ API server    │
-                    └──────────────┘ └──────────────┘ └───────────────┘
+                    │  Connection setup · Profile switcher          │
+                    │  Voice mode (ASR/TTS)                        │
+                    └───────────────────┬──────────────────────────┘
+                                         │
+                           HTTPS+SSE, Bearer key (or profile-scoped token)
+                                         │
+                                ┌────────▼─────────┐
+                                │ Hermes instance   │
+                                │ (own VPS/laptop)  │
+                                │ API server        │
+                                │ ── Profile A ──   │
+                                │ ── Profile B ──   │
+                                └───────────────────┘
 ```
 
 | Layer | Responsibility |
 |-------|----------------|
-| **Mobile** | Chat UI, streaming display, tool-call feed, session list, endpoint manager |
-| **API Server (per instance)** | Agent turn orchestration, tool execution, session persistence, SSE events |
-| **Hermes Agent (per instance)** | Reasoning, tool calls, memory, skills, cron, delegation |
+| **Mobile** | Chat UI, streaming display, tool-call feed, session list, connection setup, profile switcher |
+| **API Server (the one instance)** | Agent turn orchestration, tool execution, session persistence, SSE events, profile isolation |
+| **Hermes Agent (the one instance)** | Reasoning, tool calls, memory, skills, cron, delegation — per profile |
 
 ---
 
@@ -52,7 +65,7 @@ Red → green → refactor. Test the *behavior*, not the implementation.
 
 - **Write the failing test first** for every feature, bug fix, and edge case.
   No test = the work isn't done.
-- Unit tests cover the pure logic: SSE parser, sentence buffer, endpoint
+- Unit tests cover the pure logic: SSE parser, sentence buffer, connection
   validation, event normalization, interrupt semantics.
 - Hooks and components get behavioral tests (React Testing Library) with fake
   streams — never hit the real network in tests.
@@ -74,12 +87,12 @@ Red → green → refactor. Test the *behavior*, not the implementation.
   API client are each behind a small interface (see Voice Profile and the
   `makeClient` factory). Adding a provider = adding a module, not editing the
   pipeline.
-- **No god files.** The SSE parser, the chat store, and the endpoint manager
+- **No god files.** The SSE parser, the chat store, and the connection setup
   each get their own module from day one — refactoring them later is how
   modular code dies.
-- **Feature isolation:** endpoints, voice, and chat are separate store slices
-  with separate test files. One feature's change never breaks another's
-  tests.
+- **Feature isolation:** connection, profiles, voice, and chat are separate
+  store slices with separate test files. One feature's change never breaks
+  another's tests.
 
 ---
 
@@ -89,19 +102,18 @@ Red → green → refactor. Test the *behavior*, not the implementation.
 hermes-mobile/
 ├── app/                        # Expo Router file-based routes
 │   ├── (auth)/
-│   │   ├── setup.tsx           # Add endpoint: server URL + API key
+│   │   ├── setup.tsx           # Connect: server URL + API key (also used to reconfigure)
 │   │   └── voice-profile.tsx   # Voice profile: ASR/TTS providers + keys
 │   ├── (tabs)/
-│   │   ├── index.tsx           # Chat screen (main, active endpoint)
-│   │   ├── endpoints.tsx       # Endpoint manager — list/add/remove instances
-│   │   ├── sessions.tsx        # Session list / resume (per endpoint)
+│   │   ├── index.tsx           # Chat screen (main)
+│   │   ├── sessions.tsx        # Session list / resume (current profile)
 │   │   └── tools.tsx           # Toolset/skill discovery view
-│   ├── chat/[endpointId]/[sessionId].tsx  # Per-endpoint, per-session chat
+│   ├── chat/[sessionId].tsx    # Per-session chat
 │   ├── _layout.tsx
 │   └── +not-found.tsx
 ├── src/
-│   ├── api/                    # HTTP + SSE layer (per-endpoint client factory)
-│   │   ├── client.ts           # makeClient(baseUrl, key): fetch wrapper + auth + errors
+│   ├── api/                    # HTTP + SSE layer (single client factory)
+│   │   ├── client.ts           # makeClient(baseUrl, credential): fetch wrapper + auth + errors
 │   │   ├── sse.ts              # SSE stream parser (fetch + ReadableStream)
 │   │   ├── runs.ts             # Runs API: create, events, stop, approval
 │   │   ├── sessions.ts         # Sessions API: list, create, fork, messages
@@ -122,16 +134,15 @@ hermes-mobile/
 │   │   ├── useCapabilities.ts  # Feature detection via /v1/capabilities
 │   │   └── useTheme.ts         # Resolves settings store + system scheme → active Theme
 │   ├── stores/
-│   │   ├── endpoints.ts        # Saved instances (SecureStore-backed): id, name, url, key
-│   │   ├── activeEndpoint.ts   # Currently selected endpoint
+│   │   ├── connection.ts       # The one configured instance (SecureStore-backed): url, key
 │   │   ├── voiceProfile.ts     # ASR/TTS provider + key per user (SecureStore-backed)
-│   │   ├── chat.ts             # In-flight run state, message queue — keyed by (endpointId, profileId)
-│   │   ├── activeProfile.ts    # Selected profile + scoped credential per endpointId (SecureStore-backed)
+│   │   ├── chat.ts             # In-flight run state, message queue — keyed by profileId | null
+│   │   ├── activeProfile.ts    # Currently selected profile + scoped credential (SecureStore-backed)
 │   │   └── settings.ts         # App-level prefs (theme: 'system'|'light'|'dark'), AsyncStorage-backed
 │   ├── types/
 │   │   ├── api.ts              # Envelope types mirroring API server
 │   │   ├── events.ts           # SSE event types (assistant.delta, tool.*)
-│   │   ├── endpoints.ts        # Endpoint model + validation
+│   │   ├── connection.ts       # Connection model + validation
 │   │   ├── profiles.ts         # Profile model + validation
 │   │   └── voice.ts            # ASR/TTS provider config + session types
 │   ├── utils/
@@ -240,35 +251,33 @@ agent observability view, not just a chat bubble list.
    HTTP/SSE; `src/types/events.ts` is the contract between them.
 3. **Reconnect-safe runs.** If the phone drops the stream, poll
    `GET /v1/runs/{id}` and re-attach to `/events` — never lose the turn.
-4. **Endpoints are isolated units.** Every connection is `(baseUrl, apiKey)`.
-   No shared state, no cross-talk, no central sync. One endpoint's failure or
-   removal never affects another. The app is a thin shell over N independent
-   Hermes instances.
-5. **Credentials live only on-device, per endpoint.** API keys in SecureStore,
-   scoped to their endpoint id. Never in AsyncStorage, never in the bundle,
-   never uploaded anywhere.
-6. **Profiles are isolated units within an endpoint.** One instance can host
-   N independent profiles (own sessions, skills, memory, credentials) — see
-   Profiles section. Everything keyed by `endpointId` alone in earlier
-   sections of this doc becomes keyed by `(endpointId, profileId)` once
-   profiles exist for that instance.
+4. **One connection at a time.** The app targets exactly one Hermes instance
+   `(baseUrl, apiKey)`, configured once. Multiple simultaneous instances are
+   out of scope for now (see "When to add complexity" if that changes).
+5. **Credentials live only on-device.** The connection's API key lives in
+   SecureStore. Never in AsyncStorage, never in the bundle, never uploaded
+   anywhere.
+6. **Profiles are isolated units within the one connection.** The instance
+   can host N independent profiles (own sessions, skills, memory,
+   credentials) — see Profiles section. Everything in this doc that's
+   scoped per-session or per-usage is keyed by `profileId | null` (the
+   `null` case covers instances without profiles, or before Phase 3 lands).
 
 ### Data flow
 
 ```
-User taps endpoint (endpoints store)
+App launches → reads the stored connection (or sends user to setup if none)
   → GET /v1/capabilities → profiles: true?
-    → yes: GET /v1/profiles → show picker, dynamically populated for THIS
-            endpoint only (re-fetched fresh every time a different endpoint
-            is pressed — never cached across endpoints)
+    → yes: GET /v1/profiles → show picker, populated live from THIS
+            connection's current state — never cached across app sessions
       → user picks profile → POST /v1/profiles/{id}/token → profile credential
-    → no: skip picker, use endpoint.apiKey directly (backward compatible)
+    → no: skip picker, use the connection's apiKey directly (backward compatible)
   → taps send
-    → makeClient(endpoint.url, activeCredential)
+    → makeClient(connection.url, activeCredential)
       → useChat.createRun(sessionId, input)
         → POST /v1/runs   (Authorization: Bearer <activeCredential>)
         → subscribe GET /v1/runs/{id}/events (SSE)
-          → normalize events → store (zustand, keyed by endpointId+profileId)
+          → normalize events → store (zustand, keyed by profileId | null)
             → ChatScreen renders bubbles + ToolCallCards
               → run.completed → persist session, stop stream, allow next message
 ```
@@ -280,9 +289,9 @@ User taps endpoint (endpoints store)
 | `expo` + `expo-router` | App shell and routing |
 | `react-native-sse` (or fetch-stream polyfill) | Server-Sent Events client |
 | `@tanstack/react-query` | Server state: session lists, job lists, polling |
-| `zustand` | Endpoints, active endpoint, in-flight run state |
-| `expo-secure-store` | Per-endpoint API keys + server URLs |
-| `react-hook-form` + `zod` | Endpoint form + runtime validation of event payloads |
+| `zustand` | Connection, active profile, in-flight run state |
+| `expo-secure-store` | The connection's API key + server URL, plus the active profile credential |
+| `react-hook-form` + `zod` | Connection setup form + runtime validation of event payloads |
 | `expo-notifications` | Optional: local notification when a long run completes in background |
 | `expo-av` (or `expo-audio`) | Mic capture + audio playback for voice mode |
 | `whisper.cpp` RN binding (or WASM) | On-device free ASR (whisper.cpp) |
@@ -314,14 +323,14 @@ User taps endpoint (endpoints store)
 
 **Auth note:** the API server is bearer-auth only, single key. Anyone with the
 key has agent access (terminal!) — keep the key out of the repo, out of the
-bundle; enter it at setup, store in SecureStore. If the VPS endpoint is
-public, put it behind Caddy with TLS and consider an IP allowlist.
+bundle; enter it at setup, store in SecureStore. If the VPS instance is
+publicly reachable, put it behind Caddy with TLS and consider an IP allowlist.
 
 ---
 
 ## Observability & cost visibility
 
-Two things a distributed, BYO-endpoint app cannot get for free: knowing what a
+Two things a remote, BYO-instance app cannot get for free: knowing what a
 run costs before you fire it, and knowing why something broke on a device you
 can't SSH into. Both are core-loop concerns, not polish — build them in at
 scaffold time, not after screens exist.
@@ -330,15 +339,14 @@ scaffold time, not after screens exist.
 
 - `run.completed` and `run.failed` events already carry `usage?: TokenUsage`
   (see Event shape above) — persist it instead of discarding it.
-- **Per-endpoint (and per-profile) running total**: `stores/usage.ts`
-  accumulates token usage (and cost, if the endpoint reports pricing) keyed
-  by `(endpointId, profileId)` — see the re-keying note in the Profiles
-  section — surfaced as a badge in the chat header and a breakdown in the
-  endpoint manager (broken out per profile, once an instance has more than
-  one).
-- **Budget guard**: an optional per-endpoint soft limit, set in the endpoint's
+- **Per-profile running total**: `stores/usage.ts` accumulates token usage
+  (and cost, if the instance reports pricing) keyed by `profileId | null` —
+  see the re-keying note in the Profiles section — surfaced as a badge in
+  the chat header and a breakdown in the connection settings screen (broken
+  out per profile, once the instance has more than one).
+- **Budget guard**: an optional soft limit, set in the connection's
   settings. Crossing it surfaces a non-blocking warning before the next run
-  starts ("this endpoint has used ~140K tokens today") — it never blocks
+  starts ("this profile has used ~140K tokens today") — it never blocks
   silently, since the app has no authority to cap what the *server* actually
   does.
 - Read-only reporting of numbers the server already emits — no new backend
@@ -392,7 +400,7 @@ library — plain design tokens + a hook, consistent with the KISS principle.
   component ever hardcodes a color; everything reads from these tokens.
 - **`src/stores/settings.ts`**: `theme: 'system' | 'light' | 'dark'`,
   persisted via AsyncStorage (not a secret — no SecureStore needed, unlike
-  endpoints/voice keys).
+  the connection/voice keys).
 - **`src/hooks/useTheme.ts`**: the single entry point every themed component
   calls. Resolves `settings.theme` — if `'system'`, falls back to React
   Native's built-in `useColorScheme()`; if `'light'`/`'dark'`, that value
@@ -401,7 +409,7 @@ library — plain design tokens + a hook, consistent with the KISS principle.
   appearance change (e.g. iOS's time-based dark mode) — no extra wiring
   needed beyond consuming the hook.
 - **Toggle placement**: a simple light/dark/system control, not a whole new
-  screen — surfaced in an existing screen's header (e.g. endpoint manager)
+  screen — surfaced in an existing screen's header (e.g. connection setup)
   rather than standing up a dedicated Settings tab for one control. Add a
   real Settings screen only if a second setting shows up that needs one.
 - Built entirely on RN/Expo built-ins (`useColorScheme`, AsyncStorage) — no
@@ -429,10 +437,10 @@ every change lands with its test first.
 
 | Layer | Tool | Focus | Written when |
 |-------|------|-------|--------------|
-| Pure logic | Jest | SSE parser, sentenceBuffer, endpoint validation, event normalization, interrupt semantics | First — pure functions, no mocks |
+| Pure logic | Jest | SSE parser, sentenceBuffer, connection validation, event normalization, interrupt semantics | First — pure functions, no mocks |
 | API layer | Jest + mocked fetch/SSE | `makeClient` payloads, auth header, error mapping (mirror the endpoint table above) | Before wiring the UI |
 | Hooks | Jest + Testing Library | `useChat`, `useVoiceChat` lifecycles with fake streams | Before the screens |
-| Stores | Jest | endpoints/activeEndpoint/voiceProfile/chat state transitions | Before the screens |
+| Stores | Jest | connection/voiceProfile/chat/activeProfile state transitions | Before the screens |
 | Components | React Native Testing Library | Bubble render, ToolCallCard states, MicButton interactions | Alongside the component |
 | Accessibility | RNTL + `accessibility-info` assertions | Live-region announcements, ToolCallCard/MicButton labels and state (see Accessibility section) | Alongside the component |
 | Theming | Jest | `useTheme` resolution: system light, system dark, each manual override | Before components consume it |
@@ -462,31 +470,37 @@ stays local (needs a live Hermes), never in CI.
 
 ---
 
-## Endpoint manager (the decentralized core)
+## Connection setup (single instance)
 
-The app is useless until a user points it at at least one Hermes instance. The
-endpoint manager is the first screen and the backbone of the whole design.
+The app is useless until a user points it at their one Hermes instance.
+Setup is the first screen and the backbone of the whole design — there is
+**no list to manage**, just one configured connection at a time.
 
-**Endpoint model (stored in SecureStore, keyed by endpointId):**
+**Connection model (stored in SecureStore):**
 
 ```ts
-type Endpoint = {
-  id: string;              // uuid — local, never leaves the device
-  name: string;            // user label: "my VPS", "work laptop"
+type Connection = {
+  name?: string;           // optional user label: "my VPS"
   baseUrl: string;         // https://api.zyldjan.com or tailscale IP
   apiKey: string;          // that instance's API_SERVER_KEY
-  createdAt: number;
+  connectedAt: number;
   lastUsedAt?: number;
 };
 ```
 
-**Adding an endpoint** — the one flow every user does once per instance:
+No `id` field — there's only ever one, so nothing needs to key off it.
+(If multi-instance support returns later, this is the type that gains an
+`id` again — see "When to add complexity".)
 
-1. User taps "+ Add Hermes"
-2. Enters a name, server URL, and API key (from their Hermes host's `.env`)
+**Connecting** — the one flow every user does once (or again, if
+reconfiguring):
+
+1. First launch with no stored connection → setup screen shown automatically
+2. Enters server URL and API key (from their Hermes host's `.env`), optional
+   label
 3. App validates with `GET /v1/capabilities` (or `/health`) using those
    credentials — wrong key/URL fails fast with a clear error
-4. On success: save to SecureStore, mark active, open chat
+4. On success: save to SecureStore, open chat
 
 **Onboarding hand-holding (make this dead simple):**
 
@@ -498,24 +512,25 @@ App:    Show: on your Hermes machine, run:
         Then paste URL + key here.
 ```
 
-**Switching** — active endpoint is a single zustand field; every API client is
-created per-request from the active endpoint's credentials, so switching is
-instant and stateless on the app side.
+**Reconfiguring** — replacing the connection with a different instance
+entirely (not the same as switching profiles, which stays *within* one
+instance — see Profiles section). This is the heavy action: confirm before
+proceeding, since it wipes the current connection's local session state.
 
-**Removal** — deleting an endpoint wipes its key from SecureStore and its
-sessions from local state. The remote instance is untouched (the app never
-modifies another machine — it only talks to it).
+**Disconnecting** — clearing the stored connection wipes the API key from
+SecureStore and all local session/profile state. The remote instance is
+untouched (the app never modifies the machine it talks to — only itself).
 
 ---
 
-## Profiles (per-instance accounts)
+## Profiles (accounts within the one instance)
 
-**A single Hermes instance can host multiple independent profiles** —
-separate config, sessions, skills, memory, and credentials, all under one
-install. Think of them as accounts/workspace partitions on that one host.
-This is layered on top of the endpoint model above, not a replacement for
-it: `Endpoint` is still "which host," `Profile` is now "which account on
-that host."
+**The single configured Hermes instance can host multiple independent
+profiles** — separate config, sessions, skills, memory, and credentials, all
+under one install. Think of them as accounts/workspace partitions on that
+one host. This is layered on top of the connection above, not a replacement
+for it: the connection is "which host" (now always exactly one), `Profile`
+is "which account on that host."
 
 **This requires new backend contract that doesn't exist yet** (`GET
 /v1/profiles`, `POST /v1/profiles/{id}/token` — see Backend contract table).
@@ -532,78 +547,78 @@ type Profile = {
 };
 ```
 
-Profiles are **not** stored the way endpoints are — the list is always
-fetched live from the instance (`GET /v1/profiles`), never cached across
-app sessions, since it reflects that host's current state, not something
-the phone owns. Only the **active** profile selection persists locally:
+Profiles are **not** stored the way the connection is — the list is always
+fetched live from the instance (`GET /v1/profiles`), never cached across app
+sessions, since it reflects that host's current state, not something the
+phone owns. Only the **active** profile selection persists locally:
 
 ```ts
-// stores/activeProfile.ts — one entry per endpointId
+// stores/activeProfile.ts — a single active-profile record, not a map
 type ActiveProfile = {
-  endpointId: string;
   profileId: string;
   credential: string;   // profile-scoped token from /v1/profiles/{id}/token
   selectedAt: number;
 };
 ```
 
-Stored in SecureStore, keyed by `endpointId` — same trust tier as the
-endpoint's own API key, since a profile credential is itself agent access.
+Stored in SecureStore — same trust tier as the connection's own API key,
+since a profile credential is itself agent access. No per-connection keying
+needed now that there's only one connection.
 
 ### Dynamic population — the actual ask
 
-The profile list is fetched **fresh, per endpoint, at the moment the user
-presses that specific endpoint** — never pre-fetched for all endpoints, never
-shown from a stale cache:
+The profile list is fetched **fresh, at the moment the connection is made
+(or the app reopens)** — never pre-fetched, never shown from a stale cache:
 
-1. User taps an endpoint in the endpoint manager.
-2. App checks `/v1/capabilities` for that endpoint — `profiles: true`?
+1. App connects (fresh setup, or reopening with a stored connection).
+2. App checks `/v1/capabilities` — `profiles: true`?
    - **No** (older/unpatched host, or a host with no profiles feature at
-     all): skip straight to chat using `endpoint.apiKey`, exactly like
-     today. Zero behavior change for single-profile instances.
-   - **Yes**: call `GET /v1/profiles` against *that instance* right then —
-     the list shown is whatever that host currently reports, which can
-     differ completely from the last endpoint's list.
+     all): skip straight to chat using the connection's `apiKey`, exactly
+     like today. Zero behavior change for single-profile instances.
+   - **Yes**: call `GET /v1/profiles` right then — the list shown is
+     whatever that host currently reports.
 3. User picks a profile → `POST /v1/profiles/{id}/token` → store the
-   returned credential in `activeProfile` for that `endpointId` → open chat.
+   returned credential in `activeProfile` → open chat.
 4. If the instance only reports one profile, still show it (don't silently
    auto-select) — the user should always know which account they're in,
    since sessions/memory differ per profile.
 
 ### Re-keying existing stores
 
-Everything that was keyed by `endpointId` alone in earlier sections of this
-doc — `stores/chat.ts`, `stores/usage.ts` (Observability & cost visibility),
-session lists (Sessions phase) — becomes keyed by the composite
-`(endpointId, profileId)` once an instance has profiles. For instances
-without profiles, treat it as `(endpointId, null)` so the same store shape
-covers both cases without a separate code path.
+Everything that was previously keyed by an endpoint id in earlier drafts of
+this doc — `stores/chat.ts`, `stores/usage.ts` (Observability & cost
+visibility), session lists (Sessions phase) — is keyed by `profileId | null`
+now that there's only one connection. `null` covers instances without
+profiles, or before Phase 3 lands, so the same store shape covers both cases
+without a separate code path.
 
-### Switching profiles vs. switching endpoints
+### Switching profiles vs. reconfiguring the connection
 
-Switching endpoints is a full context switch (different host entirely).
-Switching profiles *within* the same endpoint should feel lighter — same
-host, same connection health, just a different account — but still fully
-isolated: no session, memory, or usage-total bleed between profiles on the
-same instance. Surface a profile switcher in the chat header (next to the
-endpoint name) so switching doesn't require going back to the endpoint list.
+Reconfiguring the connection (pointing at a *different* host entirely) is
+the heavy action — see "Reconfiguring" in Connection setup, it's basically
+redoing setup and wipes local state. Switching profiles *within* the current
+connection should feel lighter — same host, same connection health, just a
+different account — but still fully isolated: no session, memory, or
+usage-total bleed between profiles on the same instance. Surface a profile
+switcher in the chat header so switching doesn't require leaving the chat
+screen.
 
 ### Open questions to resolve against the real backend contract once built
 
-- Does `/v1/profiles` require the endpoint's own `apiKey` to call (a
+- Does `/v1/profiles` require the connection's own `apiKey` to call (a
   "gateway key" that only lists profiles), or is listing profiles itself
-  gated per-profile somehow? Assumed: endpoint key lists, profile token
+  gated per-profile somehow? Assumed: connection key lists, profile token
   gates everything else — confirm against the actual implementation.
 - Token lifetime/refresh for the profile-scoped credential — does it expire?
   If so, `api/client.ts` needs a refresh-on-401 path that re-runs step 3
   above rather than surfacing "re-enter API key" (which would be wrong here
-  — the endpoint key may still be fine, only the profile token expired).
+  — the connection's key may still be fine, only the profile token expired).
 
 ---
 
 ## Voice mode (the differentiator)
 
-Real-time spoken conversation with any connected Hermes instance. The agent
+Real-time spoken conversation with the connected Hermes instance. The agent
 "thinks" with its own model; the phone owns the speech pipeline with the
 user's own keys.
 
@@ -611,7 +626,7 @@ user's own keys.
 
 ```
   Listen  → ASR/transcriber   → USER's key (on-device)
-  Think   → Hermes agent      → the endpoint's own model (no key needed —
+  Think   → Hermes agent      → the instance's own model (no key needed —
                                 the instance already has one; the app never
                                 calls an LLM directly, that would bypass tools)
   Speak   → TTS               → USER's key (on-device)
@@ -619,8 +634,9 @@ user's own keys.
 
 The phone runs the voice pipeline; the Hermes instance only does agent
 reasoning + tools. Keys live on the user's device — consistent with the
-decentralized BYO-endpoint model. Voice works against ANY Hermes instance,
-including other people's, with nothing installed on their side.
+single-instance, BYO-connection model. Voice works against whichever
+instance is currently configured, with nothing installed on the host beyond
+the API server itself.
 
 ### Providers (free-first, BYO upgrade)
 
@@ -638,7 +654,7 @@ drop in their own providers via the Voice Profile screen.
 User holds mic button
   → audio streams to ASR provider (their key)
     → live transcript appears as they speak
-  → transcript → POST /v1/runs on the active endpoint
+  → transcript → POST /v1/runs on the configured connection
     → SSE events stream back (tool calls visible in the feed!)
       → agent text accumulates → sentenceBuffer cuts at sentence boundaries
         → each sentence → TTS provider (their key)
@@ -660,9 +676,10 @@ agent working (terminal, files, web) while hearing the reply. No other
 voice-agent client does this — it's the app's differentiator and directly
 showcases Hermes's agentic core.
 
-### Voice Profile (separate from endpoints)
+### Voice Profile (separate from the Hermes connection)
 
-Voice keys are the USER's; endpoints are the AGENTS'. Two stores:
+Voice keys are the USER's; the connection (and its profiles) are the
+AGENT's. Two stores:
 
 ```ts
 type VoiceProfile = {
@@ -673,7 +690,7 @@ type VoiceProfile = {
 ```
 
 Stored in SecureStore, edited in the Voice Profile screen. Switching ASR/TTS
-providers never touches endpoints or sessions.
+providers never touches the connection, agent profiles, or sessions.
 
 ### v2 (post-core)
 
@@ -689,10 +706,11 @@ providers never touches endpoints or sessions.
 | Need | Add |
 |------|-----|
 | Run completes while app closed | `expo-notifications` + jobs/webhook, or poll `GET /v1/runs/{id}` on foreground |
-| QR-code connect (scan to add endpoint) | **Blocked on a cross-repo dependency**: needs a `hermes-mobile connect` CLI command on the Hermes host repo that does not exist yet. Do not schedule this until that command is tracked/built upstream — generate the payload there (`url\|key`), camera scan fills the form on this side only. |
+| QR-code connect (scan to connect) | **Blocked on a cross-repo dependency**: needs a `hermes-mobile connect` CLI command on the Hermes host repo that does not exist yet. Do not schedule this until that command is tracked/built upstream — generate the payload there (`url\|key`), camera scan fills the setup form on this side only. |
 | Real push for long jobs | Hermes webhook → FCM relay (small server), not polling |
-| iPad / tablet layout | Responsive panes: endpoint list left, chat center, run feed right |
-| Sharing endpoints between your devices | Encrypted export/import (QR or file) of the endpoint blob — still on-device, no server |
+| iPad / tablet layout | Responsive panes: session list left, chat center, run feed right |
+| Sharing your connection between your devices | Encrypted export/import (QR or file) of the connection blob — still on-device, no server |
+| **Multiple simultaneous Hermes instances again** | Deliberately removed for now (see design principle at the top) to keep the setup/UX simple. Re-adding it means: bring back an `Endpoint` list model (`id`, `name`, `baseUrl`, `apiKey`) and its own manager screen (list/add/switch/remove), and re-key every store currently keyed by `profileId \| null` (chat, usage, sessions, activeProfile) to the composite `(endpointId, profileId \| null)` — this is the same shape the doc had before this simplification, so it's a known, bounded change if the need comes back. |
 
 **Start simple:** Runs API + SSE + session list + SecureStore. Everything else
 ships when the core loop — send, stream, render, resume — is rock solid.
@@ -709,11 +727,10 @@ implementation (Engineering principles §2).
 - [ ] Wire up Sentry (`@sentry/react-native`) with a `beforeSend` redaction filter for `apiKey`/`baseUrl` — before any other screen lands
 - [ ] Test `sse.ts` parser first (framing, partial chunks) → then implement
 - [ ] Test `makeClient(baseUrl, key)` contract (auth header, errors) → then implement
-- [ ] Endpoint store + add-endpoint screen: URL + API key → validate via `/v1/capabilities` → SecureStore
-- [ ] Endpoint manager screen: list, switch, remove
+- [ ] Connection store + setup screen: URL + API key → validate via `/v1/capabilities` → SecureStore
 - [ ] Test `useChat` lifecycle with fake streams → then Chat screen: send → `POST /v1/runs` → stream → render
 - [ ] ToolCallCard components for `tool.started` / `tool.completed` — with accessibility labels for state changes from day one, not retrofitted
-- [ ] `stores/usage.ts`: persist `run.completed`/`run.failed` token usage per endpoint, surface as a chat-header badge
+- [ ] `stores/usage.ts`: persist `run.completed`/`run.failed` token usage per profile, surface as a chat-header badge
 - [ ] Session list screen (`GET /api/sessions`) + resume via `chat/stream`
 - [ ] Voice Profile screen: ASR/TTS provider + keys → SecureStore
 - [ ] Voice v1 (test sentenceBuffer + interrupt first): mic → on-device whisper ASR → run → sentence-TTS (Edge) → play → interrupt
