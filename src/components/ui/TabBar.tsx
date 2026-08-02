@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/useTheme';
 import type { TabKey } from '@/utils/tabs';
@@ -37,6 +38,9 @@ type TabBarProps = {
  */
 export function TabBar({ activeKey, onSelect }: TabBarProps) {
   const theme = useTheme();
+  // The bar sits against the bottom edge, so it is what must clear the
+  // system gesture bar — otherwise the labels sit underneath it.
+  const insets = useSafeAreaInsets();
 
   return (
     <View
@@ -46,6 +50,7 @@ export function TabBar({ activeKey, onSelect }: TabBarProps) {
         borderTopColor: theme.colors.steel,
         borderTopWidth: 1,
         flexDirection: 'row',
+        paddingBottom: insets.bottom,
       }}
     >
       {TABS.map(({ key, glyph, label }) => {
@@ -69,14 +74,14 @@ export function TabBar({ activeKey, onSelect }: TabBarProps) {
               paddingVertical: 10,
             }}
           >
-            <Text style={{ color, fontFamily: theme.fonts.regular, fontSize: 12 }}>
+            <Text style={{ color, fontFamily: theme.fonts.regular, fontSize: theme.type(12) }}>
               {glyph}
             </Text>
             <Text
               style={{
                 color,
                 fontFamily: theme.fonts.regular,
-                fontSize: 9,
+                fontSize: theme.type(9),
                 letterSpacing: 0.5,
               }}
             >

@@ -1,6 +1,12 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
@@ -30,14 +36,19 @@ export default function SetupScreen() {
   };
 
   return (
-    <ScrollView
-      contentContainerStyle={{
-        backgroundColor: theme.colors.canvas,
-        flexGrow: 1,
-        gap: theme.spacing.md,
-        padding: theme.spacing.lg,
-      }}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
     >
+      <ScrollView
+        contentContainerStyle={{
+          backgroundColor: theme.colors.canvas,
+          flexGrow: 1,
+          gap: theme.spacing.md,
+          padding: theme.spacing.lg,
+        }}
+        keyboardShouldPersistTaps="handled"
+      >
       {/* Onboarding hand-holding: the one command that answers "where's my key?" */}
       <View
         style={{
@@ -102,5 +113,6 @@ export default function SetupScreen() {
         onPress={() => void onConnect()}
       />
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }

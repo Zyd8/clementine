@@ -1,5 +1,7 @@
 import { Tabs, usePathname, router } from 'expo-router';
 import React from 'react';
+import { View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TabBar } from '@/components/ui/TabBar';
 import { useTheme } from '@/hooks/useTheme';
@@ -16,23 +18,35 @@ import { tabKeyForPath, hrefForTab, type TabKey } from '@/utils/tabs';
  */
 export default function TabsLayout() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const activeKey = tabKeyForPath(pathname);
 
   const onSelect = (key: TabKey) => router.navigate(hrefForTab(key));
 
+  // These screens draw their own headers with `headerShown: false`, so nothing
+  // else is reserving the status-bar strip — without this the first header
+  // renders under the notch. The bar handles the bottom inset itself.
   return (
-    <Tabs
-      tabBar={() => <TabBar activeKey={activeKey} onSelect={onSelect} />}
-      screenOptions={{
-        headerShown: false,
-        sceneStyle: { backgroundColor: theme.colors.canvas },
+    <View
+      style={{
+        backgroundColor: theme.colors.canvas,
+        flex: 1,
+        paddingTop: insets.top,
       }}
     >
-      <Tabs.Screen name="index" />
-      <Tabs.Screen name="sessions" />
-      <Tabs.Screen name="profiles" />
-      <Tabs.Screen name="settings" />
-    </Tabs>
+      <Tabs
+        tabBar={() => <TabBar activeKey={activeKey} onSelect={onSelect} />}
+        screenOptions={{
+          headerShown: false,
+          sceneStyle: { backgroundColor: theme.colors.canvas },
+        }}
+      >
+        <Tabs.Screen name="index" />
+        <Tabs.Screen name="sessions" />
+        <Tabs.Screen name="profiles" />
+        <Tabs.Screen name="settings" />
+      </Tabs>
+    </View>
   );
 }

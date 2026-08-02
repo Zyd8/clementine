@@ -1,5 +1,13 @@
 import React from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { Avatar } from '@/components/ui/Avatar';
 import { useTheme } from '@/hooks/useTheme';
@@ -29,7 +37,10 @@ export default function ProfilesScreen() {
   const add = useProfilesStore((s) => s.add);
 
   return (
-    <View style={{ backgroundColor: theme.colors.canvas, flex: 1 }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
+    >
       <View
         style={{
           borderBottomColor: theme.colors.steel,
@@ -43,7 +54,7 @@ export default function ProfilesScreen() {
           style={{
             color: theme.colors.ink,
             fontFamily: theme.fonts.semibold,
-            fontSize: 13,
+            fontSize: theme.type(13),
             letterSpacing: 0.5,
           }}
         >
@@ -54,7 +65,7 @@ export default function ProfilesScreen() {
           style={{
             color: theme.colors.inkMuted,
             fontFamily: theme.fonts.regular,
-            fontSize: 11,
+            fontSize: theme.type(11),
           }}
         >
           {connection
@@ -63,12 +74,15 @@ export default function ProfilesScreen() {
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ gap: 10, padding: theme.spacing.md }}>
+      <ScrollView
+        contentContainerStyle={{ gap: 10, padding: theme.spacing.md }}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text
           style={{
             color: theme.colors.inkMuted,
             fontFamily: theme.fonts.regular,
-            fontSize: 10,
+            fontSize: theme.type(10),
             letterSpacing: 0.6,
             paddingHorizontal: 2,
           }}
@@ -107,7 +121,7 @@ export default function ProfilesScreen() {
                   borderWidth: 1,
                   color: active ? theme.colors.gold : theme.colors.inkMuted,
                   fontFamily: theme.fonts.bold,
-                  fontSize: 11,
+                  fontSize: theme.type(11),
                   height: 34,
                   textAlign: 'center',
                   width: 34,
@@ -123,7 +137,7 @@ export default function ProfilesScreen() {
                   color: theme.colors.ink,
                   flex: 1,
                   fontFamily: theme.fonts.regular,
-                  fontSize: 13,
+                  fontSize: theme.type(13),
                   minWidth: 0,
                   paddingHorizontal: 2,
                   paddingVertical: 4,
@@ -147,7 +161,7 @@ export default function ProfilesScreen() {
                   style={{
                     color: active ? theme.colors.canvas : theme.colors.inkMuted,
                     fontFamily: theme.fonts.bold,
-                    fontSize: 10,
+                    fontSize: theme.type(10),
                     letterSpacing: 0.4,
                   }}
                 >
@@ -179,7 +193,7 @@ export default function ProfilesScreen() {
             style={{
               color: theme.colors.inkMuted,
               fontFamily: theme.fonts.regular,
-              fontSize: 12,
+              fontSize: theme.type(12),
             }}
           >
             ADD PROFILE
@@ -190,7 +204,7 @@ export default function ProfilesScreen() {
           style={{
             color: theme.colors.inkMuted,
             fontFamily: theme.fonts.regular,
-            fontSize: 10.5,
+            fontSize: theme.type(10.5),
             lineHeight: 16,
             paddingHorizontal: 2,
           }}
@@ -217,7 +231,7 @@ export default function ProfilesScreen() {
               style={{
                 color: theme.colors.inkMuted,
                 fontFamily: theme.fonts.regular,
-                fontSize: 11.5,
+                fontSize: theme.type(11.5),
                 textAlign: 'center',
               }}
             >
@@ -226,6 +240,6 @@ export default function ProfilesScreen() {
           </Pressable>
         ) : null}
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }

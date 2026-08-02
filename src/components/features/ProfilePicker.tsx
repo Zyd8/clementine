@@ -67,7 +67,7 @@ export function ProfilePicker({
             style={{
               color: theme.colors.inkMuted,
               fontFamily: theme.fonts.regular,
-              fontSize: 10.5,
+              fontSize: theme.type(10.5),
               letterSpacing: 0.8,
               marginBottom: 10,
             }}
@@ -100,7 +100,7 @@ export function ProfilePicker({
                     style={{
                       color: theme.colors.ink,
                       fontFamily: theme.fonts.semibold,
-                      fontSize: 13.5,
+                      fontSize: theme.type(13.5),
                     }}
                   >
                     {profile.name}
@@ -110,7 +110,7 @@ export function ProfilePicker({
                       style={{
                         color: theme.colors.gold,
                         fontFamily: theme.fonts.semibold,
-                        fontSize: 10.5,
+                        fontSize: theme.type(10.5),
                       }}
                     >
                       ACTIVE

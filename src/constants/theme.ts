@@ -24,6 +24,15 @@ export type TypeToken = {
 
 export type Theme = {
   scheme: ThemeScheme;
+  /**
+   * Scales a design-sheet font size to the size actually rendered.
+   *
+   * One global knob. JetBrains Mono sets wider than the proportional faces
+   * the design sheet was measured against, so its numbers read a step too
+   * large on a real handset; every font size in the app goes through here so
+   * the whole scale moves together instead of drifting per screen.
+   */
+  type: (designPx: number) => number;
   /** Font families by weight — use these instead of `fontWeight`. */
   fonts: { regular: string; semibold: string; bold: string };
   colors: {
@@ -62,6 +71,12 @@ const fonts = {
   bold: 'JetBrainsMono-Bold',
 } as const;
 
+/** Tuned against a 1080x2400 handset; raise toward 1 to enlarge everything. */
+const FONT_SCALE = 0.85;
+
+const type = (designPx: number): number =>
+  Math.round(designPx * FONT_SCALE * 10) / 10;
+
 const spacing = { xs: 4, sm: 8, md: 16, lg: 24 } as const;
 
 /** 4px chips/tool lines, 8px cards/bubbles, full-round for the mic button only. */
@@ -69,10 +84,30 @@ const radius = { sm: 4, md: 8, full: 9999 } as const;
 
 /** rem values from DESIGN.md converted at a 16px base. */
 const typography = {
-  display: { fontFamily: fonts.bold, fontSize: 32, fontWeight: '700', lineHeight: 38 },
-  heading: { fontFamily: fonts.semibold, fontSize: 20, fontWeight: '600', lineHeight: 26 },
-  body: { fontFamily: fonts.regular, fontSize: 15, fontWeight: '400', lineHeight: 23 },
-  mono: { fontFamily: fonts.regular, fontSize: 14, fontWeight: '400', lineHeight: 20 },
+  display: {
+    fontFamily: fonts.bold,
+    fontSize: type(32),
+    fontWeight: '700',
+    lineHeight: type(38),
+  },
+  heading: {
+    fontFamily: fonts.semibold,
+    fontSize: type(20),
+    fontWeight: '600',
+    lineHeight: type(26),
+  },
+  body: {
+    fontFamily: fonts.regular,
+    fontSize: type(15),
+    fontWeight: '400',
+    lineHeight: type(23),
+  },
+  mono: {
+    fontFamily: fonts.regular,
+    fontSize: type(14),
+    fontWeight: '400',
+    lineHeight: type(20),
+  },
 } as const satisfies Theme['typography'];
 
 /** Semantic colors that must not drift between schemes. */
@@ -86,6 +121,7 @@ const signal = {
 export const darkTheme: Theme = {
   scheme: 'dark',
   fonts,
+  type,
   colors: {
     canvas: '#1a1d23',
     canvasRaised: '#23272f',
@@ -102,6 +138,7 @@ export const darkTheme: Theme = {
 export const lightTheme: Theme = {
   scheme: 'light',
   fonts,
+  type,
   colors: {
     // Warm off-white rather than pure white, mirroring "never pure black".
     canvas: '#f5f3f0',

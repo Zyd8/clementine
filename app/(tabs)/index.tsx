@@ -107,13 +107,13 @@ export default function ChatScreen() {
             width: 56,
           }}
         >
-          <Text style={{ color: theme.colors.inkMuted, fontSize: 22 }}>◆</Text>
+          <Text style={{ color: theme.colors.inkMuted, fontSize: theme.type(22) }}>◆</Text>
         </View>
         <Text
           style={{
             color: theme.colors.ink,
             fontFamily: theme.fonts.semibold,
-            fontSize: 14,
+            fontSize: theme.type(14),
             textAlign: 'center',
           }}
         >
@@ -123,7 +123,7 @@ export default function ChatScreen() {
           style={{
             color: theme.colors.inkMuted,
             fontFamily: theme.fonts.regular,
-            fontSize: 12,
+            fontSize: theme.type(12),
             lineHeight: 19,
             maxWidth: 260,
             textAlign: 'center',
@@ -147,7 +147,7 @@ export default function ChatScreen() {
             style={{
               color: theme.colors.canvas,
               fontFamily: theme.fonts.bold,
-              fontSize: 12,
+              fontSize: theme.type(12),
               letterSpacing: 0.5,
             }}
           >
@@ -160,7 +160,7 @@ export default function ChatScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
     >
       <View
@@ -200,7 +200,7 @@ export default function ChatScreen() {
               color: theme.colors.ink,
               flex: 1,
               fontFamily: theme.fonts.semibold,
-              fontSize: 14,
+              fontSize: theme.type(14),
             }}
           >
             {connection.name || connection.baseUrl}
@@ -218,7 +218,7 @@ export default function ChatScreen() {
             style={{
               color: theme.colors.ink,
               fontFamily: theme.fonts.semibold,
-              fontSize: 11.5,
+              fontSize: theme.type(11.5),
             }}
           >
             {activeProfile?.name ?? 'default'}
@@ -249,7 +249,7 @@ export default function ChatScreen() {
                 style={{
                   color: theme.colors.inkMuted,
                   fontFamily: theme.fonts.regular,
-                  fontSize: 11,
+                  fontSize: theme.type(11),
                 }}
               >
                 {`${formatTokens(usage.totalTokens)} used today`}
@@ -273,7 +273,7 @@ export default function ChatScreen() {
                   style={{
                     color: theme.colors.gold,
                     fontFamily: theme.fonts.regular,
-                    fontSize: 11,
+                    fontSize: theme.type(11),
                   }}
                 >
                   {`⚠ this endpoint has used ${formatTokens(usage.totalTokens)} today`}
@@ -318,7 +318,7 @@ export default function ChatScreen() {
             color: theme.colors.ink,
             flex: 1,
             fontFamily: theme.fonts.regular,
-            fontSize: 13.5,
+            fontSize: theme.type(13.5),
             paddingHorizontal: 12,
             paddingVertical: 11,
           }}
@@ -339,7 +339,7 @@ export default function ChatScreen() {
             style={{
               color: theme.colors.canvas,
               fontFamily: theme.fonts.bold,
-              fontSize: 16,
+              fontSize: theme.type(16),
             }}
           >
             {isStreaming ? '■' : '➜'}

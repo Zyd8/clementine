@@ -1,10 +1,17 @@
 import { render, screen } from '@testing-library/react-native';
 import React from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useSettingsStore } from '@/stores/settings';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
 
 import VoiceProfileScreen from '../../app/voice-profile';
+
+/** Without initialMetrics the provider renders nothing until it measures. */
+const METRICS = {
+  frame: { x: 0, y: 0, width: 390, height: 844 },
+  insets: { top: 48, left: 0, right: 0, bottom: 24 },
+};
 
 beforeEach(() => {
   useSettingsStore.setState({ theme: 'dark' });
@@ -22,24 +29,24 @@ beforeEach(() => {
 
 describe('VoiceProfileScreen', () => {
   it('renders the ASR provider heading', async () => {
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.getByText('Speech Recognition')).toBeTruthy();
   });
 
   it('renders the TTS provider heading', async () => {
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.getByText('Text-to-Speech')).toBeTruthy();
   });
 
   it('renders timing controls', async () => {
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.getByText('Timing')).toBeTruthy();
     expect(screen.getByText('End of speech timeout')).toBeTruthy();
     expect(screen.getByText('Max recording duration')).toBeTruthy();
   });
 
   it('renders ASR provider options', async () => {
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.getByText('whisper cpp')).toBeTruthy();
     expect(screen.getByText('groq')).toBeTruthy();
     expect(screen.getByText('deepgram')).toBeTruthy();
@@ -49,7 +56,7 @@ describe('VoiceProfileScreen', () => {
   });
 
   it('renders TTS provider options', async () => {
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.getByText('edge')).toBeTruthy();
     expect(screen.getByText('elevenlabs')).toBeTruthy();
     expect(screen.getByText('minimax')).toBeTruthy();
@@ -62,7 +69,7 @@ describe('VoiceProfileScreen', () => {
         asr: { provider: 'whisper_cpp' },
       },
     });
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.queryByText('ASR API Key')).toBeNull();
   });
 
@@ -73,7 +80,7 @@ describe('VoiceProfileScreen', () => {
         asr: { provider: 'groq' },
       },
     });
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.getByText('ASR API Key')).toBeTruthy();
   });
 
@@ -84,7 +91,7 @@ describe('VoiceProfileScreen', () => {
         tts: { provider: 'edge' },
       },
     });
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.queryByText('TTS API Key')).toBeNull();
   });
 
@@ -95,18 +102,18 @@ describe('VoiceProfileScreen', () => {
         tts: { provider: 'elevenlabs' },
       },
     });
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.getByText('TTS API Key')).toBeTruthy();
     expect(screen.getByText('Voice ID')).toBeTruthy();
   });
 
   it('renders a SAVE button', async () => {
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     expect(screen.getByText('SAVE')).toBeTruthy();
   });
 
   it('shows current timeout values', async () => {
-    await render(<VoiceProfileScreen />);
+    await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
     // The steppers show the numeric values with units
     expect(screen.getByText('900ms')).toBeTruthy();
     expect(screen.getByText('60000ms')).toBeTruthy();

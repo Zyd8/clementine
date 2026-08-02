@@ -56,7 +56,7 @@ export default function SessionsScreen() {
             style={{
               color: theme.colors.ink,
               fontFamily: theme.fonts.semibold,
-              fontSize: 13,
+              fontSize: theme.type(13),
               letterSpacing: 0.5,
             }}
           >
@@ -68,7 +68,7 @@ export default function SessionsScreen() {
               style={{
                 color: theme.colors.ink,
                 fontFamily: theme.fonts.semibold,
-                fontSize: 11.5,
+                fontSize: theme.type(11.5),
               }}
             >
               {activeProfile?.name ?? 'default'}
@@ -88,7 +88,7 @@ export default function SessionsScreen() {
               color: theme.colors.inkMuted,
               flex: 1,
               fontFamily: theme.fonts.regular,
-              fontSize: 11,
+              fontSize: theme.type(11),
             }}
           >
             {connection?.name ?? 'no hermes connected'}
@@ -98,7 +98,7 @@ export default function SessionsScreen() {
               style={{
                 color: theme.colors.gold,
                 fontFamily: theme.fonts.bold,
-                fontSize: 11,
+                fontSize: theme.type(11),
                 letterSpacing: 0.4,
               }}
             >

@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { useTheme } from '@/hooks/useTheme';
 import { useBudgetStore } from '@/stores/budget';
@@ -59,7 +67,7 @@ export default function SettingsScreen() {
       style={{
         color: theme.colors.inkMuted,
         fontFamily: theme.fonts.regular,
-        fontSize: 10.5,
+        fontSize: theme.type(10.5),
         letterSpacing: 0.8,
       }}
     >
@@ -95,19 +103,22 @@ export default function SettingsScreen() {
         style={{
           color: selected ? theme.colors.gold : theme.colors.inkMuted,
           fontFamily: theme.fonts.regular,
-          fontSize: 12.5,
+          fontSize: theme.type(12.5),
         }}
       >
         {label}
       </Text>
       {selected ? (
-        <Text style={{ color: theme.colors.gold, fontSize: 11 }}>●</Text>
+        <Text style={{ color: theme.colors.gold, fontSize: theme.type(11) }}>●</Text>
       ) : null}
     </Pressable>
   );
 
   return (
-    <View style={{ backgroundColor: theme.colors.canvas, flex: 1 }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
+    >
       <View
         style={{
           borderBottomColor: theme.colors.steel,
@@ -120,7 +131,7 @@ export default function SettingsScreen() {
           style={{
             color: theme.colors.ink,
             fontFamily: theme.fonts.semibold,
-            fontSize: 13,
+            fontSize: theme.type(13),
             letterSpacing: 0.5,
           }}
         >
@@ -128,7 +139,10 @@ export default function SettingsScreen() {
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ gap: 22, padding: theme.spacing.md }}>
+      <ScrollView
+        contentContainerStyle={{ gap: 22, padding: theme.spacing.md }}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={{ gap: theme.spacing.sm }}>
           {sectionLabel('THEME')}
           <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
@@ -157,7 +171,7 @@ export default function SettingsScreen() {
                     style={{
                       color: active ? theme.colors.canvas : theme.colors.inkMuted,
                       fontFamily: theme.fonts.regular,
-                      fontSize: 11.5,
+                      fontSize: theme.type(11.5),
                     }}
                   >
                     {option.toUpperCase()}
@@ -208,7 +222,7 @@ export default function SettingsScreen() {
                 color: theme.colors.ink,
                 flex: 1,
                 fontFamily: theme.fonts.regular,
-                fontSize: 13,
+                fontSize: theme.type(13),
                 paddingHorizontal: 12,
                 paddingVertical: 10,
               }}
@@ -217,7 +231,7 @@ export default function SettingsScreen() {
               style={{
                 color: theme.colors.inkMuted,
                 fontFamily: theme.fonts.regular,
-                fontSize: 11,
+                fontSize: theme.type(11),
               }}
             >
               tok / day
@@ -227,13 +241,13 @@ export default function SettingsScreen() {
             style={{
               color: theme.colors.inkMuted,
               fontFamily: theme.fonts.regular,
-              fontSize: 10.5,
+              fontSize: theme.type(10.5),
             }}
           >
             non-blocking warning only — the app can&apos;t cap what the server does
           </Text>
         </View>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }

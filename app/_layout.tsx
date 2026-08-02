@@ -2,6 +2,7 @@ import { useFonts } from 'expo-font';
 import { Stack, router, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/useTheme';
 import { useBudgetStore } from '@/stores/budget';
@@ -66,18 +67,23 @@ export default function RootLayout() {
   }
 
   return (
-    <Stack
-      screenOptions={{
-        headerStyle: { backgroundColor: theme.colors.canvas },
-        headerTintColor: theme.colors.ink,
-        headerTitleStyle: { fontFamily: theme.fonts.bold, fontSize: 20 },
-        contentStyle: { backgroundColor: theme.colors.canvas },
-      }}
-    >
-      <Stack.Screen name="index" options={{ title: 'CLEMENTINE' }} />
-      <Stack.Screen name="sessions" options={{ title: 'SESSIONS' }} />
-      <Stack.Screen name="voice-profile" options={{ title: 'VOICE PROFILE' }} />
-      <Stack.Screen name="setup" options={{ title: 'CONNECT HERMES' }} />
-    </Stack>
+    <SafeAreaProvider>
+      <Stack
+        screenOptions={{
+          headerStyle: { backgroundColor: theme.colors.canvas },
+          headerTintColor: theme.colors.ink,
+          headerTitleStyle: { fontFamily: theme.fonts.bold, fontSize: theme.type(20) },
+          contentStyle: { backgroundColor: theme.colors.canvas },
+        }}
+      >
+        {/* The tab group draws its own per-screen headers and the tab bar, so
+            the stack must not stack a second header on top of it. Naming a
+            route here that no longer exists at this level is what produced
+            "No route named index exists in nested children". */}
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="voice-profile" options={{ title: 'VOICE PROFILE' }} />
+        <Stack.Screen name="setup" options={{ title: 'CONNECT HERMES' }} />
+      </Stack>
+    </SafeAreaProvider>
   );
 }
