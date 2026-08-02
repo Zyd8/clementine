@@ -1,16 +1,16 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
+import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
 import type { AsrProviderConfig, TtsProviderConfig } from '@/types/voice';
@@ -112,6 +112,10 @@ function Stepper({
 
 export default function VoiceProfileScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  // KeyboardAvoidingView did nothing on Android — see useKeyboardOverlap.
+  const screenRef = useRef<View>(null);
+  const keyboardOverlap = useKeyboardOverlap(screenRef);
   const profile = useVoiceProfileStore((s) => s.profile);
   const updateAsr = useVoiceProfileStore((s) => s.updateAsrConfig);
   const updateTts = useVoiceProfileStore((s) => s.updateTtsConfig);
@@ -135,18 +139,19 @@ export default function VoiceProfileScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
-    >
+    // The wrapper carries the ref: the keyboard covers the bottom of the
+    // screen, and that is what the scroll content has to clear.
+    <View ref={screenRef} style={{ backgroundColor: theme.colors.canvas, flex: 1 }}>
       <ScrollView
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           backgroundColor: theme.colors.canvas,
           flexGrow: 1,
           gap: theme.spacing.md,
           padding: theme.spacing.lg,
+          // Clears the gesture bar, then the keyboard on top of it.
+          paddingBottom: theme.spacing.lg + insets.bottom + keyboardOverlap,
         }}
-        keyboardShouldPersistTaps="handled"
       >
       {/* ASR provider picker */}
       <Text
@@ -297,6 +302,6 @@ export default function VoiceProfileScreen() {
 
       <Button label="SAVE" onPress={save} />
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 
+import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
 import { useBudgetStore } from '@/stores/budget';
 import { useConnectionStore } from '@/stores/connection';
@@ -43,6 +44,8 @@ const TTS_OPTIONS: readonly { value: TtsProviderConfig['provider']; label: strin
  */
 export default function SettingsScreen() {
   const theme = useTheme();
+  const screenRef = useRef<View>(null);
+  const keyboardOverlap = useKeyboardOverlap(screenRef);
 
   const preference = useSettingsStore((s) => s.theme);
   const setTheme = useSettingsStore((s) => s.setTheme);
@@ -140,7 +143,7 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ gap: 22, padding: theme.spacing.md }}
+        contentContainerStyle={{ gap: 22, padding: theme.spacing.md , paddingBottom: theme.spacing.md + keyboardOverlap }}
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ gap: theme.spacing.sm }}>

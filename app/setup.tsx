@@ -1,16 +1,12 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
-  View,
-} from 'react-native';
+import { useRef, useState } from 'react';
+import { ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { useConnectionSetup } from '@/hooks/useConnectionSetup';
+import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
 import { useConnectionStore } from '@/stores/connection';
 
@@ -31,24 +27,31 @@ export default function SetupScreen() {
 
   const busy = status === 'validating';
 
+  const insets = useSafeAreaInsets();
+  // KeyboardAvoidingView did nothing on Android — see useKeyboardOverlap.
+  const screenRef = useRef<View>(null);
+  const keyboardOverlap = useKeyboardOverlap(screenRef);
+
   const onConnect = async () => {
     if (await submit({ name, baseUrl, apiKey })) router.replace('/');
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
+    // The wrapper carries the ref: the keyboard covers the bottom of the
+    // screen, and that is what the scroll content has to clear.
+    <View ref={screenRef} style={{ backgroundColor: theme.colors.canvas, flex: 1 }}>
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      style={{ backgroundColor: theme.colors.canvas }}
+      contentContainerStyle={{
+        backgroundColor: theme.colors.canvas,
+        flexGrow: 1,
+        gap: theme.spacing.md,
+        padding: theme.spacing.lg,
+        // Clears the gesture bar, then the keyboard on top of it.
+        paddingBottom: theme.spacing.lg + insets.bottom + keyboardOverlap,
+      }}
     >
-      <ScrollView
-        contentContainerStyle={{
-          backgroundColor: theme.colors.canvas,
-          flexGrow: 1,
-          gap: theme.spacing.md,
-          padding: theme.spacing.lg,
-        }}
-        keyboardShouldPersistTaps="handled"
-      >
       {/* Onboarding hand-holding: the one command that answers "where's my key?" */}
       <View
         style={{
@@ -113,6 +116,6 @@ export default function SetupScreen() {
         onPress={() => void onConnect()}
       />
     </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }

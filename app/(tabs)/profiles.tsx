@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { Avatar } from '@/components/ui/Avatar';
+import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
 import { useConnectionStore } from '@/stores/connection';
 import { useProfilesStore } from '@/stores/profiles';
@@ -26,6 +27,8 @@ import { useProfilesStore } from '@/stores/profiles';
  */
 export default function ProfilesScreen() {
   const theme = useTheme();
+  const screenRef = useRef<View>(null);
+  const keyboardOverlap = useKeyboardOverlap(screenRef);
   const connection = useConnectionStore((s) => s.connection);
   const disconnect = useConnectionStore((s) => s.disconnect);
 
@@ -75,7 +78,7 @@ export default function ProfilesScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ gap: 10, padding: theme.spacing.md }}
+        contentContainerStyle={{ gap: 10, padding: theme.spacing.md , paddingBottom: theme.spacing.md + keyboardOverlap }}
         keyboardShouldPersistTaps="handled"
       >
         <Text

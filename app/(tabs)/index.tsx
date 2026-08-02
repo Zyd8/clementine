@@ -1,14 +1,6 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
-import {
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useRef, useState } from 'react';
+import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 
 import { ProfilePicker } from '@/components/features/ProfilePicker';
 import { ThinkingDots } from '@/components/features/ThinkingDots';
@@ -17,6 +9,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Bubble } from '@/components/ui/Bubble';
 import { MicButton } from '@/components/ui/MicButton';
 import { useChat } from '@/hooks/useChat';
+import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useBudgetStore } from '@/stores/budget';
@@ -50,6 +43,10 @@ export default function ChatScreen() {
   const { voiceState, tapMic } = useVoiceChat(profileId);
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // KeyboardAvoidingView did nothing on Android — see useKeyboardOverlap.
+  const composerRef = useRef<View>(null);
+  const keyboardOverlap = useKeyboardOverlap(composerRef);
 
   const onSend = () => {
     const text = draft;
@@ -159,10 +156,7 @@ export default function ChatScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
-    >
+    <View style={{ backgroundColor: theme.colors.canvas, flex: 1 }}>
       <View
         style={{
           alignItems: 'center',
@@ -231,6 +225,7 @@ export default function ChatScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={{ gap: theme.spacing.sm, padding: theme.spacing.md }}
+        keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View style={{ gap: theme.spacing.sm, marginBottom: theme.spacing.sm }}>
             <View
@@ -293,12 +288,14 @@ export default function ChatScreen() {
       />
 
       <View
+        ref={composerRef}
         style={{
           alignItems: 'center',
           borderTopColor: theme.colors.steel,
           borderTopWidth: 1,
           flexDirection: 'row',
           gap: 10,
+          marginBottom: keyboardOverlap,
           paddingHorizontal: 14,
           paddingVertical: 12,
         }}
@@ -359,6 +356,6 @@ export default function ChatScreen() {
         activeId={activeId}
         onSelectProfile={(id) => void selectProfile(id)}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
