@@ -95,4 +95,34 @@ describe('Bubble', () => {
       lightTheme.colors.canvasRaised,
     );
   });
+
+  it('renders an http MEDIA tag as an Image', async () => {
+    await render(
+      <Bubble role="assistant" text={'Here it is:\nMEDIA:https://example.com/adobo.jpg\nDone.'} />,
+    );
+    const img = screen.getByLabelText('Image: adobo.jpg');
+    expect(img).toBeTruthy();
+    expect(img.props.source).toEqual({ uri: 'https://example.com/adobo.jpg' });
+    // The surrounding text is still rendered.
+    expect(screen.getByText(/Here it is:/)).toBeTruthy();
+    expect(screen.getByText(/Done\./)).toBeTruthy();
+  });
+
+  it('does not render the raw MEDIA: token when the target is an http URL', async () => {
+    await render(<Bubble role="assistant" text={'MEDIA:https://example.com/pic.png'} />);
+    expect(screen.queryByText(/MEDIA:/)).toBeNull();
+    expect(screen.getByLabelText('Image: pic.png')).toBeTruthy();
+  });
+
+  it('shows a note for a host-local MEDIA path the phone cannot fetch', async () => {
+    await render(<Bubble role="assistant" text={'MEDIA:/home/clez/adobo.jpg'} />);
+    expect(screen.queryByText(/MEDIA:/)).toBeNull();
+    expect(screen.getByText(/adobo.jpg/)).toBeTruthy();
+    expect(screen.getByText(/not reachable from the phone/)).toBeTruthy();
+  });
+
+  it('leaves non-media assistant text untouched', async () => {
+    await render(<Bubble role="assistant" text="no media here" />);
+    expect(screen.getByText('no media here')).toBeTruthy();
+  });
 });

@@ -68,11 +68,12 @@ export function SessionRow({
         borderLeftWidth: isResuming || isFork ? 2 : 0,
         flexDirection: 'row',
         gap: theme.spacing.sm,
-        padding: theme.spacing.md,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.sm,
       })}
     >
       {/* Content area */}
-      <View style={{ flex: 1, gap: theme.spacing.xs }}>
+      <View style={{ flex: 1, gap: 2 }}>
         {/* Title row */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text
@@ -80,7 +81,7 @@ export function SessionRow({
             style={{
               color: theme.colors.ink,
               fontFamily: theme.typography.heading.fontFamily,
-              fontSize: theme.typography.heading.fontSize,
+              fontSize: theme.type(14),
               fontWeight: '600',
               flex: 1,
             }}
@@ -92,33 +93,34 @@ export function SessionRow({
             style={{
               color: theme.colors.inkMuted,
               fontFamily: theme.typography.mono.fontFamily,
-              fontSize: theme.typography.mono.fontSize,
+              fontSize: theme.type(10),
             }}
           >
             {time}
           </Text>
         </View>
 
-        {/* Preview */}
+        {/* Preview — one line, muted, small. Matches the settings/profiles
+            tab scale rather than the chat body scale. */}
         <Text
-          numberOfLines={2}
+          numberOfLines={1}
           style={{
             color: theme.colors.inkMuted,
             fontFamily: theme.typography.body.fontFamily,
-            fontSize: theme.typography.body.fontSize,
-            lineHeight: theme.typography.body.lineHeight,
+            fontSize: theme.type(11),
+            lineHeight: theme.type(15),
           }}
         >
           {session.preview}
         </Text>
 
         {/* Metadata row: message count + fork button */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 1 }}>
           <Text
             style={{
               color: theme.colors.inkMuted,
               fontFamily: theme.typography.mono.fontFamily,
-              fontSize: theme.typography.mono.fontSize,
+              fontSize: theme.type(10),
             }}
           >
             {session.messageCount} msgs
@@ -132,14 +134,14 @@ export function SessionRow({
               borderRadius: theme.radius.sm,
               borderWidth: 1,
               paddingHorizontal: theme.spacing.sm,
-              paddingVertical: theme.spacing.xs,
+              paddingVertical: 2,
             }}
           >
             <Text
               style={{
                 color: theme.colors.inkMuted,
                 fontFamily: theme.typography.mono.fontFamily,
-                fontSize: theme.typography.mono.fontSize,
+                fontSize: theme.type(10),
               }}
             >
               FORK

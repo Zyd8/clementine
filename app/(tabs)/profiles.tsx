@@ -1,7 +1,5 @@
 import React, { useRef } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -40,8 +38,8 @@ export default function ProfilesScreen() {
   const add = useProfilesStore((s) => s.add);
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <View
+      ref={screenRef}
       style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
     >
       <View
@@ -243,6 +241,6 @@ export default function ProfilesScreen() {
           </Pressable>
         ) : null}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }

@@ -1,7 +1,5 @@
 import React, { useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -118,8 +116,8 @@ export default function SettingsScreen() {
   );
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <View
+      ref={screenRef}
       style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
     >
       <View
@@ -251,6 +249,6 @@ export default function SettingsScreen() {
           </Text>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
