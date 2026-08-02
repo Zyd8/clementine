@@ -222,3 +222,39 @@ describe('VoiceScreen — the ring as a tap target', () => {
     expect(mockTapMic).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The ring alone was easy to miss as an interrupt control — nothing on
+ * screen told you tapping it would cut the reply off. A small stop-shaped
+ * button makes the affordance explicit while the reply plays, without
+ * removing the ring's own tap handling.
+ */
+describe('VoiceScreen — dedicated interrupt button', () => {
+  it('shows an interrupt button while the reply plays', async () => {
+    mockVoiceState = 'PLAYING';
+    await show();
+
+    expect(screen.getByTestId('voice-interrupt-button')).toBeTruthy();
+  });
+
+  it('interrupts on press', async () => {
+    mockVoiceState = 'PLAYING';
+    await show();
+    mockTapMic.mockClear();
+
+    fireEvent.press(screen.getByTestId('voice-interrupt-button'));
+
+    expect(mockTapMic).toHaveBeenCalled();
+  });
+
+  /** Nothing to interrupt outside PLAYING — the button would be misleading. */
+  it.each(['IDLE', 'LISTENING', 'PROCESSING'] as const)(
+    'hides the interrupt button in %s',
+    async (state) => {
+      mockVoiceState = state;
+      await show();
+
+      expect(screen.queryByTestId('voice-interrupt-button')).toBeNull();
+    },
+  );
+});

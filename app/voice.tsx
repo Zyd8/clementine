@@ -182,6 +182,40 @@ export default function VoiceScreen() {
           />
         </Pressable>
 
+        {/* Tapping the ring already interrupts, but nothing on screen said
+            so. A small stop-shaped button underneath makes it discoverable
+            while the reply plays, which is the only state where
+            interrupting is possible. Faint red rather than solid — this is
+            an option sitting under the reply, not an alarm. */}
+        {voiceState === 'PLAYING' ? (
+          <Pressable
+            testID="voice-interrupt-button"
+            accessibilityRole="button"
+            accessibilityLabel="Interrupt and start listening"
+            onPress={() => void tapMic()}
+            hitSlop={8}
+            style={{
+              alignItems: 'center',
+              backgroundColor: `${theme.colors.err}26`,
+              borderColor: `${theme.colors.err}66`,
+              borderRadius: theme.radius.full,
+              borderWidth: 1,
+              height: 36,
+              justifyContent: 'center',
+              width: 36,
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: theme.colors.err,
+                borderRadius: 2,
+                height: 12,
+                width: 12,
+              }}
+            />
+          </Pressable>
+        ) : null}
+
         <Text
           testID="voice-transcript"
           style={{
