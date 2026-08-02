@@ -13,7 +13,6 @@ import { createRecorder, RECORDING_FORMAT, type Recorder } from '@/voice/recorde
 import { executeInterrupt } from '@/voice/interrupt';
 import { createSentenceBuffer, type SentenceBuffer } from '@/voice/sentenceBuffer';
 import { createTtsProvider, type TtsProvider } from '@/voice/tts';
-import { createBargeInDetector } from '@/voice/bargeIn';
 import { createVadClient, type VadClient, type VadCallbacks } from '@/voice/vad';
 
 /**
@@ -88,23 +87,10 @@ export function useVoiceChat(profileId: ProfileId = null) {
    *
    * The VAD relearns from the level feed, but a fresh client starts from a
    * conservative seed — so for the first samples of every turn the threshold
-   * sat far below where the room had already been measured. The barge-in bar
-   * is derived from that threshold, so it collapsed too and the agent's own
-   * echo cut its own reply off. The room is the same one it was a sentence
-   * ago; remember it.
+   * sat far below where the room had already been measured. The room is the
+   * same one it was a sentence ago; remember it.
    */
   const noiseFloorRef = useRef<number | undefined>(undefined);
-  /**
-   * Who currently owns the microphone.
-   *
-   * Barge-in opens the mic during PLAYING purely to meter, and gives it back
-   * when that effect tears down. But the reply ending starts a listening turn
-   * BEFORE React runs that cleanup, so the cleanup's `cancel()` killed the
-   * recording the new turn had just opened — the agent replied once and never
-   * heard anything again. Each claimant takes a token; a teardown only gives
-   * the mic back if nobody has claimed it since.
-   */
-  const micOwner = useRef(0);
   const fullTranscript = useRef('');
 
   // ---- State transition helpers (update both React state and ref) ----
@@ -344,10 +330,6 @@ export function useVoiceChat(profileId: ProfileId = null) {
   const enterListening = useCallback(async () => {
     if (inFlight.current) return;
 
-    // Claim the mic, so a barge-in teardown still in flight cannot cancel the
-    // recording this turn is about to start.
-    micOwner.current += 1;
-
     transition('LISTENING');
     setLiveTranscript('');
     fullTranscript.current = '';
@@ -533,51 +515,16 @@ export function useVoiceChat(profileId: ProfileId = null) {
   }, [voiceState, pushAudioLevel, recorder]);
 
   /**
-   * Barge-in: listen while the agent speaks, and cut it off when the user
-   * starts talking.
+   * No barge-in: the mic stays fully closed while the agent speaks.
    *
-   * Interrupting by tapping was never reachable — the ring is not a button —
-   * and a spoken conversation should not need one anyway: talking over
-   * someone IS the interruption.
-   *
-   * The mic is opened purely to meter here; the clip is discarded rather than
-   * transcribed, because it contains the agent's own voice. `enterListening`
-   * then opens a clean recording for what the user is actually saying.
+   * It used to open during PLAYING purely to meter, so a loud enough level
+   * could interrupt automatically. But the mic then hears the agent's own
+   * voice at full volume — the phone plays TTS through the same speaker it
+   * records from — and without real echo cancellation nothing separates that
+   * from a real interruption. Tapping the ring is the reliable way to
+   * interrupt now; not opening the mic at all is what makes tapping reliable,
+   * since there is no echo left to confuse it.
    */
-  useEffect(() => {
-    if (voiceState !== 'PLAYING') return;
-
-    const token = (micOwner.current += 1);
-    const detector = createBargeInDetector(speechThreshold);
-    // Set before any await, so the cleanup below can tell a barge-in (which
-    // hands the mic to enterListening) from an ordinary exit (which must give
-    // the mic back). Cancelling in the first case would kill the recording
-    // that the new listening turn had already started.
-    let barged = false;
-
-    void recorder.start();
-
-    const id = setInterval(() => {
-      const level = recorder.level();
-      setAudioLevel(level);
-      if (!detector.push(level)) return;
-
-      barged = true;
-      clearInterval(id);
-      void (async () => {
-        // Discard the metering clip — it is mostly the agent talking.
-        await recorder.cancel();
-        await interruptPlayback();
-      })();
-    }, 100);
-
-    return () => {
-      clearInterval(id);
-      // Only give the mic back if this effect still owns it. A listening turn
-      // that started first has already claimed it.
-      if (!barged && micOwner.current === token) void recorder.cancel();
-    };
-  }, [voiceState, speechThreshold, recorder, interruptPlayback]);
 
   return {
     voiceState,

@@ -552,14 +552,16 @@ describe('useVoiceChat', () => {
   });
 
   /**
-   * Talking over the agent IS the interruption — the ring is not a button, so
-   * there was no way to cut a reply short at all. The mocked recorder meters
-   * a constant loud level, which is exactly a user talking over the reply.
+   * There is no barge-in: without real echo cancellation, the phone hears its
+   * own speaker through the same mic it would use to detect a barge-in, and
+   * nothing tells that apart from an actual interruption. The mic now stays
+   * closed for the whole of PLAYING; tapping the ring is the only way in.
    */
-  describe('barge-in', () => {
-    it('cuts the reply short when the user talks over it', async () => {
-      const { stopRun } = jest.requireMock('@/api/runs') as { stopRun: jest.Mock };
-      stopRun.mockClear();
+  describe('during PLAYING', () => {
+    it('never opens the mic while the reply plays, however loud the room is', async () => {
+      const audio = jest.requireMock('expo-audio') as {
+        useAudioRecorder: () => { record: jest.Mock };
+      };
 
       mockedStream.mockReturnValue(
         streamOf([
@@ -583,25 +585,18 @@ describe('useVoiceChat', () => {
         expect(result.current.voiceState).toBe('PLAYING');
       });
 
-      // The reply plays, and the mic hears only its echo.
-      mockMetering = -45;
+      audio.useAudioRecorder().record.mockClear();
+      mockMetering = -3; // as loud as a shouted barge-in would have been
+
       await act(async () => {
         await new Promise((r) => setTimeout(r, 700));
       });
-      expect(result.current.voiceState).toBe('PLAYING');
 
-      // Now the user talks over it, well above the measured echo.
-      mockMetering = -3;
-      await waitFor(
-        () => {
-          expect(result.current.voiceState).toBe('LISTENING');
-        },
-        { timeout: 3000 },
-      );
+      expect(result.current.voiceState).toBe('PLAYING');
+      expect(audio.useAudioRecorder().record).not.toHaveBeenCalled();
     });
 
-    /** The reply must not cut itself off — a steady level is its own echo. */
-    it('does not interrupt itself when only the reply is audible', async () => {
+    it('only the ring interrupts the reply', async () => {
       mockedStream.mockReturnValue(
         streamOf([
           { type: 'assistant.delta', text: 'A long reply.' } as StreamEvent,
@@ -624,15 +619,11 @@ describe('useVoiceChat', () => {
         expect(result.current.voiceState).toBe('PLAYING');
       });
 
-      // A loud but STEADY level: the agent's own voice, never a barge-in.
-      // (Below BARGE_IN_CEILING — past that the bar deliberately stops rising
-      // so the reply cannot become uninterruptible.)
-      mockMetering = -20;
       await act(async () => {
-        await new Promise((r) => setTimeout(r, 1500));
+        await result.current.tapMic();
       });
 
-      expect(result.current.voiceState).toBe('PLAYING');
+      expect(result.current.voiceState).toBe('LISTENING');
     });
   });
 
@@ -682,7 +673,10 @@ describe('useVoiceChat', () => {
      * The regression this guards: barge-in opens the mic during the reply and
      * gives it back on teardown, but the relisten starts a turn BEFORE React
      * runs that teardown — so the teardown cancelled the recording the new
-     * turn had just opened, and the agent replied once and went deaf.
+     * turn had just opened, and the agent replied once and went deaf. That
+     * mic-during-PLAYING effect is gone now (no barge-in, see above), so the
+     * race itself cannot recur — kept as a live check that the relisten mic
+     * still works.
      */
     it('leaves the mic recording for the turn that follows the reply', async () => {
       const audio = jest.requireMock('expo-audio') as {
