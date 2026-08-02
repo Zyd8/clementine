@@ -40,7 +40,14 @@ export default function ProfilesScreen() {
   return (
     <View
       ref={screenRef}
-      style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
+      style={{
+        backgroundColor: theme.colors.canvas,
+        flex: 1,
+        // Ends the scroll viewport at the keyboard's top edge. Padding the
+        // content alone leaves the viewport under the keyboard, so nothing
+        // the user scrolls to is actually visible.
+        paddingBottom: keyboardOverlap,
+      }}
     >
       <View
         style={{
@@ -76,7 +83,7 @@ export default function ProfilesScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ gap: 10, padding: theme.spacing.md , paddingBottom: theme.spacing.md + keyboardOverlap }}
+        contentContainerStyle={{ gap: 10, padding: theme.spacing.md, paddingBottom: theme.spacing.lg }}
         keyboardShouldPersistTaps="handled"
       >
         <Text

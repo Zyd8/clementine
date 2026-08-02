@@ -39,7 +39,16 @@ export default function SetupScreen() {
   return (
     // The wrapper carries the ref: the keyboard covers the bottom of the
     // screen, and that is what the scroll content has to clear.
-    <View ref={screenRef} style={{ backgroundColor: theme.colors.canvas, flex: 1 }}>
+    <View
+      ref={screenRef}
+      style={{
+        backgroundColor: theme.colors.canvas,
+        flex: 1,
+        // Ends the scroll viewport at the keyboard's top edge; padding the
+        // content alone leaves the viewport itself under the keyboard.
+        paddingBottom: keyboardOverlap,
+      }}
+    >
     <ScrollView
       keyboardShouldPersistTaps="handled"
       style={{ backgroundColor: theme.colors.canvas }}
@@ -49,7 +58,7 @@ export default function SetupScreen() {
         gap: theme.spacing.md,
         padding: theme.spacing.lg,
         // Clears the gesture bar, then the keyboard on top of it.
-        paddingBottom: theme.spacing.lg + insets.bottom + keyboardOverlap,
+        paddingBottom: theme.spacing.lg + insets.bottom,
       }}
     >
       {/* Onboarding hand-holding: the one command that answers "where's my key?" */}
