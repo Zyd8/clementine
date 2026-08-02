@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { ApiError } from '@/api/client';
 import {
+  createSession,
   forkSession,
   getSessionMessages,
   listSessions,
@@ -15,12 +16,14 @@ import type { StreamEvent } from '@/types/events';
 import { useSessions } from './useSessions';
 
 jest.mock('@/api/sessions', () => ({
+  createSession: jest.fn(),
   listSessions: jest.fn(),
   getSessionMessages: jest.fn(),
   forkSession: jest.fn(),
   streamSessionChat: jest.fn(),
 }));
 
+const mockedCreate = createSession as jest.MockedFunction<typeof createSession>;
 const mockedList = listSessions as jest.MockedFunction<typeof listSessions>;
 const mockedMessages = getSessionMessages as jest.MockedFunction<typeof getSessionMessages>;
 const mockedFork = forkSession as jest.MockedFunction<typeof forkSession>;
@@ -33,7 +36,7 @@ const streamOf = (events: StreamEvent[]) =>
 
 const CONNECTION = {
   baseUrl: 'http://100.106.162.39:8642',
-  apiKey: 'a3f1c...1b',
+  apiKey: 'a3f1c09b8e7d6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b',
   connectedAt: 1,
 };
 
@@ -312,6 +315,54 @@ describe('useSessions', () => {
       await waitFor(() => {
         expect(result.current.sessions[0]).toMatchObject({ id: 'sess_new' });
       });
+    });
+  });
+
+  describe('startNew', () => {
+    beforeEach(() => {
+      mockedCreate.mockResolvedValue({
+        id: 'sess_fresh',
+        title: 'Untitled',
+        preview: '',
+        lastMessageAt: '2026-08-02T10:00:00Z',
+        messageCount: 0,
+      });
+    });
+
+    it('creates a new session via the API', async () => {
+      const { result } = await renderHook(() => useSessions());
+      await waitFor(() => expect(result.current.sessions).toHaveLength(2));
+
+      await act(async () => {
+        await result.current.startNew();
+      });
+
+      expect(mockedCreate).toHaveBeenCalledWith(CONNECTION.baseUrl, CONNECTION.apiKey, {});
+    });
+
+    it('resets the chat store for a fresh feed', async () => {
+      // Seed the store with stale data
+      useChatStore.getState().appendUserMessage(null, 'stale');
+      const { result } = await renderHook(() => useSessions());
+      await waitFor(() => expect(result.current.sessions).toHaveLength(2));
+
+      await act(async () => {
+        await result.current.startNew();
+      });
+
+      const feed = useChatStore.getState().feed(null);
+      expect(feed).toHaveLength(0);
+    });
+
+    it('does nothing when there is no connection', async () => {
+      useConnectionStore.setState({ connection: null, hydrated: true });
+      const { result } = await renderHook(() => useSessions());
+
+      await act(async () => {
+        await result.current.startNew();
+      });
+
+      expect(mockedCreate).not.toHaveBeenCalled();
     });
   });
 });

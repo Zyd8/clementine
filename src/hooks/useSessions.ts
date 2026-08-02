@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '@/api/client';
 import {
+  createSession,
   forkSession as forkSessionApi,
   getSessionMessages,
   listSessions,
@@ -12,7 +13,7 @@ import { useChatStore, type ProfileId } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
 
 /**
- * Session list + resume + fork, keyed by `profileId | null`.
+ * Session list + resume + fork + new, keyed by `profileId | null`.
  *
  * Resume loads the session's message history into the chat store so the chat
  * surface can render a scrollback, then routes to `chat/[sessionId].tsx`.
@@ -189,6 +190,14 @@ export function useSessions(profileId: ProfileId = null) {
     [connection, refresh],
   );
 
+  // ---- startNew ----
+
+  const startNew = useCallback(async () => {
+    if (!connection) return;
+    await createSession(connection.baseUrl, connection.apiKey, {});
+    useChatStore.getState().reset(profileId);
+  }, [connection, profileId]);
+
   return {
     sessions,
     isLoading,
@@ -198,5 +207,6 @@ export function useSessions(profileId: ProfileId = null) {
     send,
     fork,
     refresh,
+    startNew,
   };
 }

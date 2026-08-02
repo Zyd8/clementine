@@ -16,7 +16,15 @@ import { useChat } from '@/hooks/useChat';
 import { useTheme } from '@/hooks/useTheme';
 import { useChatStore, type FeedItem } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
+import { useSettingsStore, type ThemePreference } from '@/stores/settings';
 import { useUsageStore } from '@/stores/usage';
+
+const THEME_CYCLE: readonly ThemePreference[] = ['system', 'light', 'dark'];
+
+const nextTheme = (current: ThemePreference): ThemePreference => {
+  const idx = THEME_CYCLE.indexOf(current);
+  return THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]!;
+};
 
 /**
  * The chat surface: a terminal scrollback where user turns, agent turns and
@@ -29,6 +37,9 @@ export default function ChatScreen() {
   const usage = useUsageStore((s) => s.total(null));
   const { send, stop, isStreaming } = useChat();
   const [draft, setDraft] = useState('');
+
+  const themeMode = useSettingsStore((s) => s.theme);
+  const setTheme = useSettingsStore((s) => s.setTheme);
 
   const onSend = () => {
     const text = draft;
@@ -113,6 +124,20 @@ export default function ChatScreen() {
             }}
           >
             {usage.totalTokens > 0 ? `${usage.totalTokens} tok` : 'SETUP'}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Toggle theme"
+          onPress={() => void setTheme(nextTheme(themeMode))}
+        >
+          <Text
+            style={{
+              color: theme.colors.inkMuted,
+              fontFamily: theme.typography.mono.fontFamily,
+              fontSize: theme.typography.mono.fontSize,
+            }}
+          >
+            {themeMode.toUpperCase()}
           </Text>
         </Pressable>
       </View>
