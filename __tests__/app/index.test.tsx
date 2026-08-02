@@ -15,6 +15,12 @@ jest.mock('expo-router', () => ({
   router: { replace: jest.fn(), push: jest.fn() },
 }));
 
+// The lift value itself is covered by useKeyboardOverlap's own tests; here we
+// only care that the composer actually consumes it.
+jest.mock('@/hooks/useKeyboardOverlap', () => ({
+  useKeyboardOverlap: () => 268,
+}));
+
 jest.mock('@/hooks/useChat', () => ({
   useChat: () => ({
     send: jest.fn(),
@@ -153,5 +159,26 @@ describe('ChatScreen — composer', () => {
   it('mounts the mic button beside the send button', async () => {
     await render(<ChatScreen />);
     expect(screen.getByLabelText('Tap to talk')).toBeTruthy();
+  });
+
+  const flatten = (style: unknown): Record<string, unknown> =>
+    Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+
+  it('lifts the composer by however much the keyboard covers it', async () => {
+    await render(<ChatScreen />);
+    const composer = screen.getByLabelText('Message').parent;
+    expect(flatten(composer?.props.style).marginBottom).toBe(268);
+  });
+
+  /**
+   * The lift comes out of the list's height. A list that grows but cannot
+   * shrink overflows the column instead, pushing the composer further under
+   * the keyboard — which is exactly what happened on device.
+   */
+  it('lets the feed shrink so the lift has somewhere to come from', async () => {
+    await render(<ChatScreen />);
+    // The FlatList renders as a scroll view; find it by its testID-free role.
+    const list = screen.getByTestId('chat-feed');
+    expect(flatten(list.props.style).flex).toBe(1);
   });
 });
