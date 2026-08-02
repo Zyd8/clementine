@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react-native';
 import * as Sentry from '@sentry/react-native';
 
 import { createRun, getRun, streamRunEvents } from '@/api/runs';
+import { getSessionMessages, listSessions } from '@/api/sessions';
 import { ApiError } from '@/api/client';
 import { useChatStore } from '@/stores/chat';
 import { useUsageStore } from '@/stores/usage';
@@ -17,9 +18,18 @@ jest.mock('@/api/runs', () => ({
   streamRunEvents: jest.fn(),
 }));
 
+jest.mock('@/api/sessions', () => ({
+  listSessions: jest.fn(),
+  getSessionMessages: jest.fn(),
+}));
+
 const mockedCreateRun = createRun as jest.MockedFunction<typeof createRun>;
 const mockedGetRun = getRun as jest.MockedFunction<typeof getRun>;
 const mockedStream = streamRunEvents as jest.MockedFunction<typeof streamRunEvents>;
+const mockedListSessions = listSessions as jest.MockedFunction<typeof listSessions>;
+const mockedGetSessionMessages = getSessionMessages as jest.MockedFunction<
+  typeof getSessionMessages
+>;
 
 /** Turns a fixed list of events into the async iterable the hook consumes. */
 const streamOf = (events: StreamEvent[]) =>
@@ -49,6 +59,10 @@ describe('useChat', () => {
     useConnectionStore.setState({ connection: CONNECTION, hydrated: true });
     mockedCreateRun.mockResolvedValue({ runId: 'run_abc', status: 'started' });
     mockedStream.mockReturnValue(streamOf([]));
+    // No prior session by default — matches every existing test's
+    // expectations (a fresh createRun call, nothing to resume).
+    mockedListSessions.mockResolvedValue({ sessions: [] });
+    mockedGetSessionMessages.mockResolvedValue({ messages: [] });
   });
 
   it('renders the user message optimistically, before the run is created', async () => {
@@ -457,6 +471,164 @@ describe('useChat', () => {
           expect.objectContaining({ tags: { reason: 'stream' } }),
         );
       });
+    });
+  });
+
+  describe('session continuity', () => {
+    /**
+     * `createRun` with no session id creates a brand-new session — the bug
+     * this exists for: reopening the app used to start a fresh conversation
+     * every time, because nothing ever remembered where the last one left
+     * off.
+     */
+    it('resumes the most recent session on mount, before anything is sent', async () => {
+      mockedListSessions.mockResolvedValue({
+        sessions: [
+          {
+            id: 'sess_last',
+            title: 'x',
+            preview: '',
+            lastMessageAt: '2026-01-01T00:00:00Z',
+            messageCount: 2,
+          },
+        ],
+      });
+      mockedGetSessionMessages.mockResolvedValue({
+        messages: [
+          { role: 'user', content: 'earlier question' },
+          { role: 'assistant', content: 'earlier answer' },
+        ],
+      });
+
+      await renderHook(() => useChat());
+
+      await waitFor(() => {
+        expect(feed()).toEqual([
+          expect.objectContaining({ kind: 'user', text: 'earlier question' }),
+          expect.objectContaining({ kind: 'assistant', text: 'earlier answer' }),
+        ]);
+      });
+    });
+
+    it('continues the resumed session, not a new one, on the next send', async () => {
+      mockedListSessions.mockResolvedValue({
+        sessions: [
+          {
+            id: 'sess_last',
+            title: 'x',
+            preview: '',
+            lastMessageAt: '2026-01-01T00:00:00Z',
+            messageCount: 1,
+          },
+        ],
+      });
+      mockedGetSessionMessages.mockResolvedValue({
+        messages: [{ role: 'user', content: 'earlier question' }],
+      });
+
+      const { result } = await renderHook(() => useChat());
+      await waitFor(() => expect(feed().length).toBeGreaterThan(0));
+
+      mockedListSessions.mockClear();
+      await act(async () => {
+        await result.current.send('follow-up');
+      });
+
+      expect(mockedCreateRun).toHaveBeenCalledWith(
+        CONNECTION.baseUrl,
+        CONNECTION.apiKey,
+        expect.objectContaining({ sessionId: 'sess_last' }),
+      );
+    });
+
+    /** A populated feed means something is already loaded — must not stomp it. */
+    it('does not resume over a feed that already has content', async () => {
+      useChatStore.getState().appendUserMessage(null, 'already here');
+      mockedListSessions.mockResolvedValue({
+        sessions: [
+          {
+            id: 'sess_other',
+            title: 'x',
+            preview: '',
+            lastMessageAt: '2026-01-01T00:00:00Z',
+            messageCount: 1,
+          },
+        ],
+      });
+
+      await renderHook(() => useChat());
+
+      await waitFor(() => {
+        expect(mockedListSessions).not.toHaveBeenCalled();
+      });
+      expect(feed()).toEqual([expect.objectContaining({ text: 'already here' })]);
+    });
+
+    /** Nothing to resume — a genuinely new profile's first-ever message. */
+    it('sends without a session id when there is nothing to resume', async () => {
+      const { result } = await renderHook(() => useChat());
+      await waitFor(() => expect(mockedListSessions).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        await result.current.send('hi');
+      });
+
+      const [, , options] = mockedCreateRun.mock.calls[0]!;
+      expect(options.sessionId).toBeUndefined();
+    });
+
+    /**
+     * The regression this guards: without this, every message from a
+     * brand-new profile spins up its own session, not just the first one —
+     * there was nothing resumed on mount to continue, so nothing was known
+     * until this lookup runs.
+     */
+    it('learns the session after the first message, so the second one continues it', async () => {
+      const { result } = await renderHook(() => useChat());
+      await waitFor(() => expect(mockedListSessions).toHaveBeenCalledTimes(1));
+
+      mockedListSessions.mockResolvedValue({
+        sessions: [
+          {
+            id: 'sess_new',
+            title: 'x',
+            preview: '',
+            lastMessageAt: '2026-01-01T00:00:00Z',
+            messageCount: 1,
+          },
+        ],
+      });
+
+      await act(async () => {
+        await result.current.send('first message');
+      });
+      await waitFor(() => expect(mockedListSessions).toHaveBeenCalledTimes(2));
+
+      await act(async () => {
+        await result.current.send('second message');
+      });
+
+      expect(mockedCreateRun).toHaveBeenLastCalledWith(
+        CONNECTION.baseUrl,
+        CONNECTION.apiKey,
+        expect.objectContaining({ sessionId: 'sess_new' }),
+      );
+    });
+
+    /** A resume that fails must not break sending — same as no session found. */
+    it('starts fresh, without crashing, when the resume lookup fails', async () => {
+      mockedListSessions.mockRejectedValue(new Error('network'));
+
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('hi');
+      });
+
+      expect(mockedCreateRun).toHaveBeenCalledWith(
+        CONNECTION.baseUrl,
+        CONNECTION.apiKey,
+        expect.not.objectContaining({ sessionId: expect.anything() }),
+      );
     });
   });
 });

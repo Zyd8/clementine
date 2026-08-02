@@ -1,8 +1,9 @@
 import * as Sentry from '@sentry/react-native';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '@/api/client';
 import { createRun, getRun, stopRun, streamRunEvents } from '@/api/runs';
+import { getSessionMessages, listSessions } from '@/api/sessions';
 import { useChatStore, type ProfileId } from '@/stores/chat';
 import { useUsageStore } from '@/stores/usage';
 import { useConnectionStore } from '@/stores/connection';
@@ -21,6 +22,15 @@ import { useConnectionStore } from '@/stores/connection';
  * the alternative of duplicating what the user already read. If the run is
  * still running when we poll, we surface an error rather than silently
  * hanging — the client genuinely cannot re-attach today.
+ *
+ * **Session continuity.** `POST /v1/runs` continues an existing session when
+ * given one, but a fresh `createRun` call with none creates a brand-new one —
+ * which used to happen on every app open, since nothing ever remembered a
+ * session id. On mount, with an empty local feed, this looks up the most
+ * recent session and loads its history, so reopening the app continues the
+ * last conversation instead of starting a new one. A profile with no prior
+ * session at all learns its first one the same way, right after the first
+ * message completes, so every send after that also lands in the same place.
  */
 
 const GENERIC_FAILURE = 'The connection dropped mid-run.';
@@ -31,6 +41,46 @@ export function useChat(profileId: ProfileId = null) {
   // A ref, not state: `send` must see the current value synchronously to
   // reject a second submit in the same tick.
   const inFlight = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
+  const resumeAttempted = useRef(false);
+
+  // Best-effort: any failure here just leaves the chat starting fresh, the
+  // same as before this existed. Guarded to run once per mount, and only
+  // when nothing is loaded yet — a remount with an already-populated feed
+  // (switching tabs and back) must not stomp what's on screen.
+  useEffect(() => {
+    if (!connection || resumeAttempted.current) return;
+    resumeAttempted.current = true;
+    if (useChatStore.getState().feed(profileId).length > 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { sessions } = await listSessions(connection.baseUrl, connection.apiKey, {
+          limit: 1,
+          offset: 0,
+        });
+        const last = sessions[0];
+        if (!last || cancelled) return;
+
+        const { messages } = await getSessionMessages(
+          connection.baseUrl,
+          connection.apiKey,
+          last.id,
+        );
+        if (cancelled) return;
+
+        useChatStore.getState().hydrateFromMessages(profileId, messages);
+        sessionIdRef.current = last.id;
+      } catch {
+        // No prior session to resume, or the lookup failed — starts fresh.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connection, profileId]);
 
   const send = useCallback(
     async (input: string) => {
@@ -46,7 +96,10 @@ export function useChat(profileId: ProfileId = null) {
       let runId: string | undefined;
 
       try {
-        const handle = await createRun(baseUrl, apiKey, { input: text });
+        const handle = await createRun(baseUrl, apiKey, {
+          input: text,
+          ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
+        });
         runId = handle.runId;
         store.setActiveRun(profileId, runId);
 
@@ -56,6 +109,23 @@ export function useChat(profileId: ProfileId = null) {
           // completed run so the chat header reflects total tokens.
           if (event.type === 'run.completed' && event.usage) {
             useUsageStore.getState().addUsage(profileId, event.usage);
+          }
+        }
+
+        // First-ever message for this profile: nothing existed to resume on
+        // mount, so nothing is known to continue yet. Learn it now so every
+        // send after this one lands in the same session instead of each one
+        // spinning up its own.
+        if (!sessionIdRef.current) {
+          try {
+            const { sessions } = await listSessions(baseUrl, apiKey, {
+              limit: 1,
+              offset: 0,
+            });
+            if (sessions[0]) sessionIdRef.current = sessions[0].id;
+          } catch {
+            // Best-effort — a miss here just means the next message also
+            // starts its own session, same as before this existed.
           }
         }
       } catch (error) {

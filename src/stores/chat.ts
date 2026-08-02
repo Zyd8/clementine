@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import type { StreamEvent, TokenUsage } from '@/types/events';
+import type { SessionMessage } from '@/types/sessions';
 import { profileKey, type ProfileId } from '@/utils/profile';
 
 export { profileKey, type ProfileId };
@@ -78,6 +79,8 @@ type ChatState = {
     usage?: TokenUsage,
   ) => void;
   reset: (profileId: ProfileId) => void;
+  /** Replaces the feed with a session's saved history — see the action below. */
+  hydrateFromMessages: (profileId: ProfileId, messages: SessionMessage[]) => void;
 };
 
 /** Closes any open streaming bubble. */
@@ -235,5 +238,39 @@ export const useChatStore = create<ChatState>((set, get) => {
       ),
 
     reset: (profileId) => update(profileId, emptyProfile),
+
+    /**
+     * Loads a session's saved history as the feed — used to resume a
+     * previous conversation, whether the user explicitly picked one from
+     * the Sessions list or the app auto-continues the most recent one on
+     * launch. Replaces whatever was there, same as `reset` followed by
+     * replaying each message through the normal reducer paths.
+     */
+    hydrateFromMessages: (profileId, messages) => {
+      update(profileId, emptyProfile);
+      const store = get();
+      for (const msg of messages) {
+        if (msg.role === 'user') {
+          store.appendUserMessage(profileId, msg.content);
+        } else if (msg.role === 'tool') {
+          store.applyEvent(profileId, {
+            type: 'tool.started',
+            tool: msg.tool ?? 'tool',
+            args: msg.content,
+          });
+          store.applyEvent(profileId, {
+            type: 'tool.completed',
+            tool: msg.tool ?? 'tool',
+            ok: msg.ok ?? true,
+            ...(msg.durationMs === undefined ? {} : { durationMs: msg.durationMs }),
+          });
+        } else {
+          // assistant (and any other role falls back to assistant rendering)
+          store.applyEvent(profileId, { type: 'assistant.delta', text: msg.content });
+          // Close the streaming bubble for each assistant message.
+          store.applyEvent(profileId, { type: 'run.completed', output: msg.content });
+        }
+      }
+    },
   };
 });

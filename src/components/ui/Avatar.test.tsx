@@ -58,6 +58,22 @@ describe('Avatar', () => {
     expect(screen.queryByText('fi')).toBeNull();
   });
 
+  /**
+   * A child sized to match the OUTER box (border included) overflows the
+   * ring's inner content area slightly on every edge — read as the image
+   * sitting off-center. Filling the parent's box, not copying its pixel
+   * size, is what actually centers it regardless of border width.
+   */
+  it('fills its circle rather than copying the outer pixel size', async () => {
+    await render(
+      <Avatar initials="file:///documents/avatars/default.jpg" size={34} testID="a" />,
+    );
+    const image = screen.getByLabelText('Profile avatar image');
+    const style = flatten(image.props.style);
+    expect(style.width).toBe('100%');
+    expect(style.height).toBe('100%');
+  });
+
   it('keeps the gold ring for an image avatar too', async () => {
     await render(
       <Avatar initials="file:///documents/avatars/default.jpg" testID="a" />,

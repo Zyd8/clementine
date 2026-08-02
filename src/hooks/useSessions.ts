@@ -84,38 +84,7 @@ export function useSessions(profileId: ProfileId = null) {
           sessionId,
         );
 
-        const store = useChatStore.getState();
-        store.reset(profileId);
-
-        for (const msg of messages) {
-          if (msg.role === 'user') {
-            store.appendUserMessage(profileId, msg.content);
-          } else if (msg.role === 'tool') {
-            store.applyEvent(profileId, {
-              type: 'tool.started',
-              tool: msg.tool ?? 'tool',
-              args: msg.content,
-            });
-            store.applyEvent(profileId, {
-              type: 'tool.completed',
-              tool: msg.tool ?? 'tool',
-              ok: msg.ok ?? true,
-              ...(msg.durationMs === undefined ? {} : { durationMs: msg.durationMs }),
-            });
-          } else {
-            // assistant (and any other role falls back to assistant rendering)
-            store.applyEvent(profileId, {
-              type: 'assistant.delta',
-              text: msg.content,
-            });
-            // Close the streaming bubble for each assistant message.
-            store.applyEvent(profileId, {
-              type: 'run.completed',
-              output: msg.content,
-            });
-          }
-        }
-
+        useChatStore.getState().hydrateFromMessages(profileId, messages);
         activeSessionId.current = sessionId;
       } catch (err) {
         const message = err instanceof ApiError ? err.message : 'Failed to load session.';

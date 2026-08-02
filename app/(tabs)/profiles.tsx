@@ -138,20 +138,13 @@ export default function ProfilesScreen() {
                 paddingVertical: 10,
               }}
             >
+              {/* Avatar already draws its own ring — a decorative circle on
+                  this wrapper too, at a different size, was a second ring
+                  peeking out from behind the first. Just a tap target. */}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Change avatar for ${profile.name}`}
                 onPress={() => void pickAvatar(profile.id)}
-                style={{
-                  backgroundColor: theme.colors.canvas,
-                  borderColor: active ? theme.colors.gold : theme.colors.steel,
-                  borderRadius: theme.radius.full,
-                  borderWidth: 1,
-                  flexShrink: 0,
-                  height: 34,
-                  overflow: 'hidden',
-                  width: 34,
-                }}
               >
                 <Avatar initials={profile.avatar} size={44} active={active} />
               </Pressable>

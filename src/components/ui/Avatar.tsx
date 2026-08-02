@@ -48,7 +48,12 @@ export function Avatar({ initials, size = 34, active = true, testID }: AvatarPro
         <Image
           source={{ uri: initials }}
           accessibilityLabel="Profile avatar image"
-          style={{ height: size, width: size }}
+          resizeMode="cover"
+          // '100%' of the content box, not a copy of the outer `size` — the
+          // border is drawn inside that box, so a child sized to match the
+          // OUTER box overflows it slightly on every edge, which read as the
+          // image sitting off-center inside the ring.
+          style={{ height: '100%', width: '100%' }}
         />
       ) : (
         <Text
