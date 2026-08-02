@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 
 import { ProfilePicker } from '@/components/features/ProfilePicker';
@@ -9,7 +9,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Bubble } from '@/components/ui/Bubble';
 import { MicButton } from '@/components/ui/MicButton';
 import { useChat } from '@/hooks/useChat';
-import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
+import { useKeyboardOverlap, type KeyboardProbe } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useBudgetStore } from '@/stores/budget';
@@ -46,7 +46,11 @@ export default function ChatScreen() {
 
   // KeyboardAvoidingView did nothing on Android — see useKeyboardOverlap.
   const composerRef = useRef<View>(null);
-  const keyboardOverlap = useKeyboardOverlap(composerRef);
+  // Dev-only: the three ways this can fail are indistinguishable on screen,
+  // so surface what the platform actually reported. Strip once it is settled.
+  const [probe, setProbe] = useState<KeyboardProbe | null>(null);
+  const onProbe = useCallback((next: KeyboardProbe) => setProbe(next), []);
+  const keyboardOverlap = useKeyboardOverlap(composerRef, onProbe);
 
   const onSend = () => {
     const text = draft;
@@ -286,6 +290,19 @@ export default function ChatScreen() {
           ) : null
         }
       />
+
+      {__DEV__ && probe ? (
+        <Text
+          style={{
+            color: theme.colors.gold,
+            fontFamily: theme.fonts.regular,
+            fontSize: theme.type(10),
+            paddingHorizontal: 14,
+          }}
+        >
+          {`kb#${probe.events} top=${probe.keyboardTop ?? '-'} h=${probe.keyboardHeight ?? '-'} box=${probe.viewBottom ?? '-'} lift=${probe.overlap}`}
+        </Text>
+      ) : null}
 
       <View
         ref={composerRef}

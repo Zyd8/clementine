@@ -30,7 +30,25 @@ type Measurable = {
  * padding moves the view clear, and re-measuring then would read an overlap of
  * zero and drop the padding, which would oscillate.
  */
-export function useKeyboardOverlap(ref: RefObject<Measurable | null>): number {
+/**
+ * What the last keyboard event actually reported, for on-device diagnosis.
+ * Exposed because the failure modes here are indistinguishable from the
+ * outside: "no event fired", "event fired with no height", and "window already
+ * resized so there is nothing to do" all look identical — an uncovered box
+ * that stays covered.
+ */
+export type KeyboardProbe = {
+  events: number;
+  keyboardTop: number | null;
+  keyboardHeight: number | null;
+  viewBottom: number | null;
+  overlap: number;
+};
+
+export function useKeyboardOverlap(
+  ref: RefObject<Measurable | null>,
+  onProbe?: (probe: KeyboardProbe) => void,
+): number {
   const [overlap, setOverlap] = useState(0);
 
   useEffect(() => {
@@ -39,22 +57,48 @@ export function useKeyboardOverlap(ref: RefObject<Measurable | null>): number {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
+    let events = 0;
+
     const show = Keyboard.addListener(showEvent, (event) => {
+      events += 1;
       const keyboardTop = event.endCoordinates.screenY;
+      const keyboardHeight = event.endCoordinates.height;
       const node = ref.current;
-      if (!node) return;
+      if (!node) {
+        onProbe?.({
+          events,
+          keyboardTop,
+          keyboardHeight,
+          viewBottom: null,
+          overlap: 0,
+        });
+        return;
+      }
       node.measureInWindow((_x, y, _width, height) => {
-        setOverlap(Math.max(0, y + height - keyboardTop));
+        const viewBottom = y + height;
+        const next = Math.max(0, viewBottom - keyboardTop);
+        setOverlap(next);
+        onProbe?.({ events, keyboardTop, keyboardHeight, viewBottom, overlap: next });
       });
     });
 
-    const hide = Keyboard.addListener(hideEvent, () => setOverlap(0));
+    const hide = Keyboard.addListener(hideEvent, () => {
+      events += 1;
+      setOverlap(0);
+      onProbe?.({
+        events,
+        keyboardTop: null,
+        keyboardHeight: null,
+        viewBottom: null,
+        overlap: 0,
+      });
+    });
 
     return () => {
       show.remove();
       hide.remove();
     };
-  }, [ref]);
+  }, [ref, onProbe]);
 
   return overlap;
 }
