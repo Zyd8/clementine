@@ -53,12 +53,32 @@ jest.mock('@/voice/tts', () => {
   return {
     ...actual,
     createTtsProvider: jest.fn((_config: unknown, callbacks: TtsCallbacks): TtsProvider => {
-      ttsCallbacks.current = callbacks;
+      // Tracks real play state so isPlaying() reflects it, the way a real
+      // provider does: true once something has been queued to speak, false
+      // once the caller is told (via onAllDone) that the queue is empty.
+      // A flat `true` made checkForCompletion's `!tts.isPlaying()` guard
+      // unsatisfiable in every test (stuck in PLAYING forever); a flat
+      // `false` satisfied it before speak() was ever called, skipping past
+      // PLAYING before tests could observe it. Only a stateful mock lines
+      // up with what checkForCompletion actually depends on.
+      let playing = false;
+      const wrappedCallbacks: TtsCallbacks = {
+        ...callbacks,
+        onAllDone: () => {
+          playing = false;
+          callbacks.onAllDone();
+        },
+      };
+      ttsCallbacks.current = wrappedCallbacks;
       const provider: TtsProvider = {
-        speak: jest.fn().mockResolvedValue(undefined),
-        stop: jest.fn().mockResolvedValue(undefined),
+        speak: jest.fn().mockImplementation(async () => {
+          playing = true;
+        }),
+        stop: jest.fn().mockImplementation(async () => {
+          playing = false;
+        }),
         destroy: jest.fn(),
-        isPlaying: jest.fn().mockReturnValue(true),
+        isPlaying: jest.fn(() => playing),
       };
       ttsProvider.current = provider;
       return provider;

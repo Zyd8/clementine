@@ -1,6 +1,16 @@
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
-import { Alert, FlatList, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  FlatList,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { ProfilePicker } from '@/components/features/ProfilePicker';
 import { ThinkingDots } from '@/components/features/ThinkingDots';
@@ -74,8 +84,29 @@ export default function ChatScreen() {
   // tool messages reached the bottom fully and a streaming reply didn't.
   // Called this often, instant reads as smooth following anyway.
   const feedListRef = useRef<FlatList<FeedItem>>(null);
+
+  // Whether the user is currently at (or near) the bottom of the feed. Only
+  // auto-scroll when true: otherwise a streaming token (content growth), a
+  // tool line, or the keyboard resize (onLayout) would keep ripping the user
+  // back down to the bottom while they're trying to read earlier messages.
+  // Defaults to true so opening the tab still lands at the end of the
+  // conversation, as the original comment above describes.
+  const stickToBottomRef = useRef(true);
+  // Distance from the bottom (px) that still counts as "at the bottom".
+  // Generous so a partially visible last bubble doesn't stop auto-follow.
+  const BOTTOM_STICK_THRESHOLD = 100;
+
+  const onFeedScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const distanceFromBottom =
+      contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    stickToBottomRef.current = distanceFromBottom < BOTTOM_STICK_THRESHOLD;
+  };
+
   const scrollToBottom = () => {
-    feedListRef.current?.scrollToEnd({ animated: false });
+    if (stickToBottomRef.current) {
+      feedListRef.current?.scrollToEnd({ animated: false });
+    }
   };
 
   const onSend = () => {
@@ -86,6 +117,10 @@ export default function ChatScreen() {
     // the feed (a run.failed item), same as a plain message does — there is
     // no separate "attachment didn't go through" state to hold these for.
     clearAttachments();
+    // Explicit user action — snap to the bottom even if they'd scrolled up,
+    // so the new message and its reply are visible from the moment they land.
+    stickToBottomRef.current = true;
+    feedListRef.current?.scrollToEnd({ animated: false });
     void send(text, staged);
   };
 
@@ -269,6 +304,8 @@ export default function ChatScreen() {
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={scrollToBottom}
         onLayout={scrollToBottom}
+        onScroll={onFeedScroll}
+        scrollEventThrottle={16}
         ListHeaderComponent={
           <View style={{ gap: theme.spacing.sm, marginBottom: theme.spacing.sm }}>
             <View

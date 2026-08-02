@@ -13,7 +13,7 @@ import { createAsrProvider, type AsrProvider } from '@/voice/asr';
 import { createRecorder, RECORDING_FORMAT, type Recorder } from '@/voice/recorder';
 import { executeInterrupt } from '@/voice/interrupt';
 import { createSentenceBuffer, type SentenceBuffer } from '@/voice/sentenceBuffer';
-import { describeTool, pickThinkingFiller, pickToolFiller } from '@/voice/toolNarration';
+import { pickThinkingFiller, pickToolFiller } from '@/voice/toolNarration';
 import { createTtsProvider, type TtsProvider } from '@/voice/tts';
 import { createVadClient, type VadClient, type VadCallbacks } from '@/voice/vad';
 
@@ -37,10 +37,15 @@ import { createVadClient, type VadClient, type VadCallbacks } from '@/voice/vad'
 
 /**
  * How long voice mode waits for the model's first token before speaking a
- * thinking filler. Long enough that a fast reply ("hi", no tools) answers
- * with no filler in front of it; short enough to still cover a slow model.
+ * thinking filler. This starts counting only after the run is already
+ * created — ASR upload/transcription and the request round trip have both
+ * already happened by then — but real time-to-first-token on top of that
+ * routinely clears a short window even for a trivial reply ("hi"), which is
+ * what made 1200ms fire on exchanges it was meant to skip. Long enough that
+ * a fast reply answers with no filler in front of it; short enough to still
+ * cover a slow model.
  */
-export const THINKING_FILLER_DELAY_MS = 1200;
+export const THINKING_FILLER_DELAY_MS = 2200;
 
 export function useVoiceChat(profileId: ProfileId = null) {
   const connection = useConnectionStore((s) => s.connection);
@@ -169,6 +174,15 @@ export function useVoiceChat(profileId: ProfileId = null) {
 
       const { baseUrl, apiKey } = connection;
       let runId: string | undefined;
+      // Whether the SSE stream has actually delivered `run.completed`. TTS
+      // finishing everything currently queued is NOT the same thing: a tool
+      // call interleaved after the reply has already started speaking (so
+      // the machine is already in PLAYING, not PROCESSING) drains the queue
+      // to empty while the run is still genuinely in progress — waiting on
+      // the tool, with more reply text still to come. Declaring the reply
+      // "complete" and reopening the mic at that moment was the bug; this
+      // flag is the one true signal for "actually done."
+      let runFinished = false;
       // The thinking filler is armed, not spoken immediately — see the
       // arming site inside the try. Cancelled the moment the wait is over
       // (first content, a tool call, or the run ending).
@@ -208,22 +222,12 @@ export function useVoiceChat(profileId: ProfileId = null) {
           onSentenceEnd: () => {
             // Sentence finished — next will auto-play if queued.
           },
-          onAllDone: () => {
-            // Tool-status narration (below) also finishes through this
-            // callback while the run is still PROCESSING — that is not the
-            // reply ending, so nothing here should fire until real reply
-            // content has actually put the machine into PLAYING.
-            if (stateRef.current !== 'PLAYING') return;
-            setStatus('Reply complete');
-            // The reply finishing is the cue to listen again — a conversation
-            // does not require a tap between every turn. Deferred by a tick so
-            // sendRun's `finally` clears its in-flight guard first; without
-            // that, enterListening returns early and the mic never reopens.
-            setTimeout(() => {
-              if (stateRef.current !== 'PLAYING') return;
-              void enterListeningRef.current();
-            }, 0);
-          },
+          // Fires whenever the speech queue drains to empty — which, with a
+          // tool call interleaved mid-reply, can happen more than once
+          // before the turn is genuinely over. `checkForCompletion` (below,
+          // defined once `tts` exists) is what decides whether that empty
+          // moment is real completion or just a lull.
+          onAllDone: () => checkForCompletion(),
           onError: (error) => {
             Sentry.captureException(error, { tags: { reason: 'voice' } });
             if (stateRef.current === 'PLAYING' || stateRef.current === 'PROCESSING') {
@@ -235,6 +239,25 @@ export function useVoiceChat(profileId: ProfileId = null) {
         });
         ttsRef.current = tts;
         sentenceBufRef.current.reset();
+
+        // The one place "the reply is actually over" gets decided. Called
+        // whenever the speech queue empties AND right after `run.completed`
+        // arrives (below) — either can be the LATER of the two, so both call
+        // it rather than one waiting on an event that already happened.
+        const checkForCompletion = () => {
+          if (stateRef.current !== 'PLAYING') return;
+          if (!runFinished) return;
+          if (tts.isPlaying()) return;
+          setStatus('Reply complete');
+          // The reply finishing is the cue to listen again — a conversation
+          // does not require a tap between every turn. Deferred by a tick so
+          // sendRun's `finally` clears its in-flight guard first; without
+          // that, enterListening returns early and the mic never reopens.
+          setTimeout(() => {
+            if (stateRef.current !== 'PLAYING') return;
+            void enterListeningRef.current();
+          }, 0);
+        };
 
         // Fill the silence between the mic closing and the reply actually
         // starting — the wait for the model's first token is often the
@@ -289,11 +312,13 @@ export function useVoiceChat(profileId: ProfileId = null) {
             // The tool speaks its own line — cancel any armed thinking
             // filler so the two never stack.
             cancelThinkingFiller();
-            // The status text is a description, not the raw tool name — a
-            // user hears/reads "web_search" as jargon, not information.
-            // Updated on every call (it's just text, not speech, so
-            // repeating it isn't annoying the way saying it aloud would be).
-            setStatus(`${describeTool(event.tool)}…`);
+            // The status text shows the tool's real name — read on screen
+            // it's information, not jargon. Only the SPOKEN line (below)
+            // uses the plain-language description; hearing "web_search" is
+            // the confusing one, seeing it isn't. Updated on every call —
+            // it's just text, so repeating it isn't annoying the way saying
+            // it aloud would be.
+            setStatus(`${event.tool}…`);
 
             // But only SPOKEN once per turn — several tool calls in one
             // reply must not repeat themselves. Deliberately NOT
@@ -311,8 +336,16 @@ export function useVoiceChat(profileId: ProfileId = null) {
             }
           }
 
-          if (event.type === 'run.completed' && event.usage) {
-            useUsageStore.getState().addUsage(profileId, event.usage);
+          if (event.type === 'run.completed') {
+            if (event.usage) {
+              useUsageStore.getState().addUsage(profileId, event.usage);
+            }
+            // The run is genuinely over. If nothing is left playing —
+            // everything queued already finished before this arrived —
+            // there is no future onAllDone coming to catch it, so check now
+            // rather than waiting on an event that will never fire again.
+            runFinished = true;
+            checkForCompletion();
           }
         }
 
