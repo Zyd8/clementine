@@ -1,4 +1,5 @@
-import React, { useRef } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import React, { useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -8,10 +9,12 @@ import {
 } from 'react-native';
 
 import { Avatar } from '@/components/ui/Avatar';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
 import { useConnectionStore } from '@/stores/connection';
 import { useProfilesStore } from '@/stores/profiles';
+import { persistAvatarImage } from '@/utils/avatarImage';
 
 /**
  * Profiles — the switchable unit within the one connected Hermes instance.
@@ -29,6 +32,25 @@ export default function ProfilesScreen() {
   const keyboardOverlap = useKeyboardOverlap(screenRef);
   const connection = useConnectionStore((s) => s.connection);
   const disconnect = useConnectionStore((s) => s.disconnect);
+
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  // Picks an image from the gallery, copies it into the app's document
+  // directory (the picker only hands us a cache URI that can be evicted),
+  // and stores the stable file URI on the profile.
+  const pickAvatar = async (profileId: string) => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const uri = await persistAvatarImage(result.assets[0].uri, profileId);
+    await setAvatar(profileId, uri);
+  };
 
   const profiles = useProfilesStore((s) => s.profiles);
   const activeId = useProfilesStore((s) => s.activeId);
@@ -95,7 +117,7 @@ export default function ProfilesScreen() {
             paddingHorizontal: 2,
           }}
         >
-          TAP AVATAR OR NAME TO EDIT · SELECT TO SWITCH
+          TAP AVATAR TO UPLOAD AN IMAGE · TAP NAME TO EDIT · SELECT TO SWITCH
         </Text>
 
         {profiles.map((profile) => {
@@ -116,25 +138,23 @@ export default function ProfilesScreen() {
                 paddingVertical: 10,
               }}
             >
-              <TextInput
-                aria-label={`Avatar for ${profile.name}`}
-                value={profile.avatar}
-                onChangeText={(text) => void setAvatar(profile.id, text)}
-                maxLength={2}
-                autoCapitalize="characters"
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Change avatar for ${profile.name}`}
+                onPress={() => void pickAvatar(profile.id)}
                 style={{
                   backgroundColor: theme.colors.canvas,
                   borderColor: active ? theme.colors.gold : theme.colors.steel,
                   borderRadius: theme.radius.full,
                   borderWidth: 1,
-                  color: active ? theme.colors.gold : theme.colors.inkMuted,
-                  fontFamily: theme.fonts.bold,
-                  fontSize: theme.type(11),
+                  flexShrink: 0,
                   height: 34,
-                  textAlign: 'center',
+                  overflow: 'hidden',
                   width: 34,
                 }}
-              />
+              >
+                <Avatar initials={profile.avatar} size={44} active={active} />
+              </Pressable>
               <TextInput
                 aria-label={`Name for ${profile.name}`}
                 value={profile.name}
@@ -196,7 +216,7 @@ export default function ProfilesScreen() {
             paddingVertical: 10,
           }}
         >
-          <Avatar initials="+" size={34} active={false} />
+          <Avatar initials="+" size={44} active={false} />
           <Text
             style={{
               color: theme.colors.inkMuted,
@@ -225,7 +245,7 @@ export default function ProfilesScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Disconnect hermes instance"
-            onPress={() => void disconnect()}
+            onPress={() => setConfirmDisconnect(true)}
             style={{
               borderColor: theme.colors.steel,
               borderRadius: theme.radius.md,
@@ -248,6 +268,20 @@ export default function ProfilesScreen() {
           </Pressable>
         ) : null}
       </ScrollView>
+
+      {confirmDisconnect ? (
+        <ConfirmDialog
+          visible
+          title="Disconnect this Hermes instance?"
+          message="This wipes the local connection, session and profile state on this device. The server is untouched — you can reconnect at any time."
+          confirmLabel="DISCONNECT"
+          onConfirm={() => {
+            setConfirmDisconnect(false);
+            void disconnect();
+          }}
+          onCancel={() => setConfirmDisconnect(false)}
+        />
+      ) : null}
     </View>
   );
 }

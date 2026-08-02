@@ -3,7 +3,9 @@ import React, { useEffect } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { VoiceMeter } from '@/components/features/VoiceMeter';
 import { VoiceWaveform } from '@/components/features/VoiceWaveform';
+import { SpeechPulse } from '@/components/ui/SpeechPulse';
 import { useTheme } from '@/hooks/useTheme';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useProfilesStore } from '@/stores/profiles';
@@ -38,13 +40,16 @@ export default function VoiceScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const profileId = useProfilesStore((s) => s.activeProfileId)();
-  const { voiceState, liveTranscript, audioLevel, tapMic } = useVoiceChat(profileId);
+  const { voiceState, liveTranscript, audioLevel, speechThreshold, voiceStatus, tapMic } =
+    useVoiceChat(profileId);
 
   // Transcription is a cloud call now, so voice mode cannot start without a
   // key. Opening the mic anyway would record a clip, upload it, and fail —
   // better to say what is missing before anyone speaks into nothing.
   const asr = useVoiceProfileStore((s) => s.profile.asr);
-  const needsKey = !asr.apiKey;
+  const vadNoiseMargin = useVoiceProfileStore((s) => s.profile.vadNoiseMargin);
+  const setVadNoiseMargin = useVoiceProfileStore((s) => s.setVadNoiseMargin);
+  const needsKey = !asr.keys[asr.provider];
 
   // The user tapped a mic to get here; opening the screen *is* the tap.
   useEffect(() => {
@@ -148,6 +153,15 @@ export default function VoiceScreen() {
             barCount={6}
             testID="voice-waveform"
           />
+          {/* Green flash while your voice is actually reaching the mic — the
+              state label reads "listening" whether it is working or not. */}
+          <SpeechPulse
+            level={audioLevel}
+            floor={speechThreshold}
+            listening={voiceState === 'LISTENING'}
+            inset={6}
+            testID="voice-speech-pulse"
+          />
         </View>
 
         <Text
@@ -167,6 +181,27 @@ export default function VoiceScreen() {
             : liveTranscript}
         </Text>
 
+        {/* What the pipeline is doing right now — mic open, transcribing,
+            sending, speaking — or the exact error when a step fails. This is
+            the "is it working?" answer, so it is always visible and reads as
+            status, not as a transcript. */}
+        {voiceStatus !== '' ? (
+          <Text
+            testID="voice-status"
+            accessibilityLiveRegion="polite"
+            style={{
+              color: theme.colors.gold,
+              fontFamily: theme.typography.mono.fontFamily,
+              fontSize: theme.type(11),
+              lineHeight: theme.type(17),
+              maxWidth: 300,
+              textAlign: 'center',
+            }}
+          >
+            {voiceStatus}
+          </Text>
+        ) : null}
+
         <Text
           style={{
             color: theme.colors.inkMuted,
@@ -177,6 +212,20 @@ export default function VoiceScreen() {
         >
           TOOL FEED STAYS LIVE IN CHAT
         </Text>
+      </View>
+
+      {/* Bottom-left: what the mic is actually deciding, and the one knob
+          that changes it. Defaults are tuned — this is for when a room
+          disagrees with them. */}
+      <View style={{ paddingHorizontal: 20 }}>
+        <VoiceMeter
+          level={audioLevel}
+          threshold={speechThreshold}
+          margin={vadNoiseMargin}
+          onMarginChange={(margin) => void setVadNoiseMargin(margin)}
+          listening={voiceState === 'LISTENING'}
+          testID="voice-meter"
+        />
       </View>
 
       <View style={{ alignItems: 'center', padding: 20 }}>

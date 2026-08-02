@@ -2,7 +2,7 @@
  * Token counts as the design writes them: `142.3K tok`, `450 tok`.
  *
  * Truncated rather than rounded — a usage readout that rounds up reports
- * spend the user has not made, and this number sits next to a budget warning.
+ * spend the user has not made.
  */
 export function formatTokens(count: number): string {
   if (!Number.isFinite(count) || count <= 0) return '0 tok';

@@ -27,6 +27,8 @@ jest.mock('@/hooks/useVoiceChat', () => ({
     voiceState: mockVoiceState,
     liveTranscript: mockTranscript,
     audioLevel: 0.5,
+    speechThreshold: 0.4,
+    voiceStatus: '',
     tapMic: mockTapMic,
   }),
 }));
@@ -55,7 +57,7 @@ describe('VoiceScreen', () => {
     useVoiceProfileStore.setState({
       profile: {
         ...VOICE_PROFILE_DEFAULTS,
-        asr: { provider: 'groq', apiKey: 'test-key' },
+        asr: { provider: 'groq', keys: { groq: 'test-key' } },
       },
       hydrated: true,
     });
@@ -121,7 +123,10 @@ describe('VoiceScreen', () => {
   describe('without an ASR key', () => {
     beforeEach(() => {
       useVoiceProfileStore.setState({
-        profile: { ...VOICE_PROFILE_DEFAULTS, asr: { provider: 'groq' } },
+        profile: {
+          ...VOICE_PROFILE_DEFAULTS,
+          asr: { provider: 'groq', keys: {} },
+        },
         hydrated: true,
       });
     });
@@ -157,3 +162,4 @@ describe('VoiceScreen', () => {
     expect(mockTapMic).not.toHaveBeenCalled();
   });
 });
+

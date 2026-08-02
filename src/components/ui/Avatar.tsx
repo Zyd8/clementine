@@ -1,10 +1,10 @@
 import React from 'react';
-import { Text, View } from 'react-native';
+import { Image, Text, View } from 'react-native';
 
 import { useTheme } from '@/hooks/useTheme';
 
 type AvatarProps = {
-  /** Two characters, already normalised by the profiles store. */
+  /** Two characters, or a local image URI (`file://…`) for an uploaded avatar. */
   initials: string;
   size?: number;
   /** Gold ring for the live profile, steel for the rest. */
@@ -12,15 +12,19 @@ type AvatarProps = {
   testID?: string;
 };
 
+/** A `file://` URI is an uploaded avatar image; anything else is initials. */
+const isImageUri = (value: string): boolean => value.startsWith('file://');
+
 /**
- * The profile mark: a ringed circle of initials.
+ * The profile mark: a ringed circle of initials, or the profile's locally
+ * saved avatar image once one has been uploaded.
  *
  * Deliberately a ring rather than a filled disc — gold fill means "tap me"
  * elsewhere in this app (send, mic), and an avatar is an indicator, not a
- * control. Font scales with the circle so a 22px chip and a 34px row entry
- * read the same.
+ * control. The ring and the gold/steel accent stay identical for both the
+ * initials and image forms so the two states read as one component.
  */
-export function Avatar({ initials, size = 26, active = true, testID }: AvatarProps) {
+export function Avatar({ initials, size = 34, active = true, testID }: AvatarProps) {
   const theme = useTheme();
   const accent = active ? theme.colors.gold : theme.colors.inkMuted;
 
@@ -36,18 +40,27 @@ export function Avatar({ initials, size = 26, active = true, testID }: AvatarPro
         flexShrink: 0,
         height: size,
         justifyContent: 'center',
+        overflow: 'hidden',
         width: size,
       }}
     >
-      <Text
-        style={{
-          color: accent,
-          fontFamily: theme.fonts.bold,
-          fontSize: size * 0.38,
-        }}
-      >
-        {initials}
-      </Text>
+      {isImageUri(initials) ? (
+        <Image
+          source={{ uri: initials }}
+          accessibilityLabel="Profile avatar image"
+          style={{ height: size, width: size }}
+        />
+      ) : (
+        <Text
+          style={{
+            color: accent,
+            fontFamily: theme.fonts.bold,
+            fontSize: size * 0.38,
+          }}
+        >
+          {initials}
+        </Text>
+      )}
     </View>
   );
 }

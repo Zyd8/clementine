@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import React from 'react';
 
 import { darkTheme } from '@/constants/theme';
-import { useBudgetStore, DEFAULT_DAILY_LIMIT } from '@/stores/budget';
 import { useSettingsStore } from '@/stores/settings';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
 import { VOICE_PROFILE_DEFAULTS } from '@/types/voice';
@@ -23,7 +22,6 @@ const flatten = (style: unknown): Record<string, unknown> =>
 describe('SettingsScreen', () => {
   beforeEach(() => {
     useSettingsStore.setState({ theme: 'dark', hydrated: true });
-    useBudgetStore.setState({ dailyLimit: DEFAULT_DAILY_LIMIT, hydrated: true });
     useVoiceProfileStore.setState({
       profile: { ...VOICE_PROFILE_DEFAULTS },
       hydrated: true,
@@ -88,12 +86,6 @@ describe('SettingsScreen', () => {
     );
   });
 
-  it('edits the daily token budget, digits only', async () => {
-    await render(<SettingsScreen />);
-    fireEvent.changeText(screen.getByLabelText('Daily token budget'), '20o000');
-    await waitFor(() => expect(useBudgetStore.getState().dailyLimit).toBe(20_000));
-  });
-
   /**
    * The bug this covers: the provider pickers lived here while every key
    * field lived on a second screen that nothing routed to any more. You could
@@ -115,13 +107,18 @@ describe('SettingsScreen', () => {
       await render(<SettingsScreen />);
       fireEvent.changeText(screen.getByLabelText('ASR API Key'), 'gsk_typed');
       await waitFor(() =>
-        expect(useVoiceProfileStore.getState().profile.asr.apiKey).toBe('gsk_typed'),
+        expect(useVoiceProfileStore.getState().profile.asr.keys.groq).toBe(
+          'gsk_typed',
+        ),
       );
     });
 
     it('asks for a TTS key once a keyed voice is picked', async () => {
       useVoiceProfileStore.setState({
-        profile: { ...VOICE_PROFILE_DEFAULTS, tts: { provider: 'elevenlabs' } },
+        profile: {
+          ...VOICE_PROFILE_DEFAULTS,
+          tts: { provider: 'elevenlabs', keys: {} },
+        },
         hydrated: true,
       });
       await render(<SettingsScreen />);
@@ -133,7 +130,7 @@ describe('SettingsScreen', () => {
       'opens nothing when the keyless %s voice is picked',
       async (provider) => {
         useVoiceProfileStore.setState({
-          profile: { ...VOICE_PROFILE_DEFAULTS, tts: { provider } },
+          profile: { ...VOICE_PROFILE_DEFAULTS, tts: { provider, keys: {} } },
           hydrated: true,
         });
         await render(<SettingsScreen />);
@@ -181,10 +178,5 @@ describe('SettingsScreen', () => {
         ),
       );
     });
-  });
-
-  it('says the budget cannot actually stop the server', async () => {
-    await render(<SettingsScreen />);
-    expect(screen.getByText(/non-blocking warning only/)).toBeTruthy();
   });
 });

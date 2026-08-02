@@ -87,7 +87,7 @@ beforeEach(() => {
   useVoiceProfileStore.setState({
     profile: {
       ...VOICE_PROFILE_DEFAULTS,
-      asr: { provider: 'groq', apiKey: 'test-key' },
+      asr: { provider: 'groq', keys: { groq: 'test-key' } },
     },
     hydrated: true,
   });
@@ -267,11 +267,12 @@ describe('useVoiceChat', () => {
 
   useVoiceProfileStore.setState({
         profile: {
-          asr: { provider: 'groq' as const, apiKey: 'test-key' },
-          tts: { provider: 'edge' as const },
+          asr: { provider: 'groq' as const, keys: { groq: 'test-key' } },
+          tts: { provider: 'edge' as const, keys: {} },
           interruptBehavior: 'stop_speech_and_run' as const,
           endOfSpeechTimeoutMs: 900,
           maxRecordingMs: 60_000,
+          vadNoiseMargin: 0.12,
         },
         hydrated: true,
       });
@@ -372,6 +373,34 @@ describe('useVoiceChat', () => {
       });
 
       expect(result.current.audioLevel).toBe(0.5);
+    });
+  });
+
+  describe('voice status messages', () => {
+    it('reports what the pipeline is doing while listening', async () => {
+      const { result } = await renderHook(() => useVoiceChat());
+
+      await act(async () => {
+        await result.current.tapMic();
+      });
+
+      expect(result.current.voiceStatus).toMatch(/listening/i);
+    });
+
+    it('reports a transcription error instead of silently resetting', async () => {
+      // ASR stop throws → the hook must surface the message, not swallow it.
+      (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('groq 401'));
+
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      expect(result.current.voiceStatus).toMatch(/failed/i);
+      expect(result.current.voiceState).toBe('IDLE');
     });
   });
 
@@ -516,8 +545,56 @@ describe('useVoiceChat', () => {
     });
   });
 
+  /**
+   * Talking over the agent IS the interruption — the ring is not a button, so
+   * there was no way to cut a reply short at all. The mocked recorder meters
+   * a constant loud level, which is exactly a user talking over the reply.
+   */
+  describe('barge-in', () => {
+    it('cuts the reply short when the user talks over it', async () => {
+      const { stopRun } = jest.requireMock('@/api/runs') as { stopRun: jest.Mock };
+      stopRun.mockClear();
+
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'assistant.delta', text: 'A long reply.' } as StreamEvent,
+          { type: 'run.completed', output: 'A long reply.' } as StreamEvent,
+        ]),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+      await waitFor(() => {
+        expect(result.current.voiceState).toBe('PLAYING');
+      });
+
+      // The loud mic sustains past the barge-in threshold and the turn flips
+      // back to the user without onAllDone ever firing.
+      await waitFor(
+        () => {
+          expect(result.current.voiceState).toBe('LISTENING');
+        },
+        { timeout: 3000 },
+      );
+    });
+  });
+
   describe('TTS onAllDone callback', () => {
-    it('transitions to IDLE when TTS finishes all sentences in PLAYING', async () => {
+    /**
+     * A conversation does not need a tap between every turn. Closing the mic
+     * when the reply ends left voice mode dead after one exchange — the user
+     * answers, and nothing is listening.
+     */
+    it('reopens the mic when the reply finishes, rather than going idle', async () => {
       mockedStream.mockReturnValue(
         streamOf([
           { type: 'assistant.delta', text: 'Hi.' } as StreamEvent,
@@ -544,9 +621,51 @@ describe('useVoiceChat', () => {
       // Fire onAllDone
       await act(async () => {
         ttsCallbacks.current?.onAllDone();
+        // The relisten is deferred a tick so the in-flight guard clears.
+        await new Promise((r) => setTimeout(r, 0));
       });
 
-      expect(result.current.voiceState).toBe('IDLE');
+      await waitFor(() => {
+        expect(result.current.voiceState).toBe('LISTENING');
+      });
+    });
+
+    /** An interrupt mid-reply must win — it must not be relistened over. */
+    it('does not reopen the mic when the reply was interrupted', async () => {
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'assistant.delta', text: 'Hi.' } as StreamEvent,
+          { type: 'run.completed', output: 'Hi.' } as StreamEvent,
+        ]),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+      await waitFor(() => {
+        expect(result.current.voiceState).toBe('PLAYING');
+      });
+
+      // Leave PLAYING first, then let the finished reply try to relisten.
+      await act(async () => {
+        result.current.handleAudioInterruption();
+      });
+      const afterInterrupt = result.current.voiceState;
+
+      await act(async () => {
+        ttsCallbacks.current?.onAllDone();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(result.current.voiceState).toBe(afterInterrupt);
     });
   });
 

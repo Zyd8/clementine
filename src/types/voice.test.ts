@@ -11,32 +11,45 @@ describe('voice types', () => {
       const result = asrProviderSchema.safeParse({ provider: 'groq' });
       expect(result.success).toBe(true);
       expect(result.data?.provider).toBe('groq');
-      expect(result.data?.apiKey).toBeUndefined();
+      expect(result.data?.keys).toEqual({});
     });
 
-    it('accepts groq with an apiKey', () => {
+    it('accepts groq with a key', () => {
       const result = asrProviderSchema.safeParse({
         provider: 'groq',
-        apiKey: 'g_abc',
+        keys: { groq: 'g_abc' },
       });
       expect(result.success).toBe(true);
-      expect(result.data?.apiKey).toBe('g_abc');
+      expect(result.data?.keys.groq).toBe('g_abc');
     });
 
-    it('accepts deepgram with an apiKey', () => {
+    it('accepts deepgram with a key', () => {
       const result = asrProviderSchema.safeParse({
         provider: 'deepgram',
-        apiKey: 'dg_abc',
+        keys: { deepgram: 'dg_abc' },
       });
       expect(result.success).toBe(true);
     });
 
-    it('accepts openai with an apiKey', () => {
+    it('accepts openai with a key', () => {
       const result = asrProviderSchema.safeParse({
         provider: 'openai',
-        apiKey: 'sk-abc',
+        keys: { openai: 'sk-abc' },
       });
       expect(result.success).toBe(true);
+    });
+
+    /**
+     * The reason keys is a map: one provider's credential must survive being
+     * sent to another. Switching used to overwrite the single apiKey field.
+     */
+    it('holds one key per provider at once', () => {
+      const result = asrProviderSchema.safeParse({
+        provider: 'deepgram',
+        keys: { groq: 'g_abc', deepgram: 'dg_abc' },
+      });
+      expect(result.success).toBe(true);
+      expect(result.data?.keys).toEqual({ groq: 'g_abc', deepgram: 'dg_abc' });
     });
 
     it('rejects an unknown provider', () => {
@@ -50,31 +63,31 @@ describe('voice types', () => {
       const result = ttsProviderSchema.safeParse({ provider: 'edge' });
       expect(result.success).toBe(true);
       expect(result.data?.provider).toBe('edge');
-      expect(result.data?.apiKey).toBeUndefined();
+      expect(result.data?.keys).toEqual({});
     });
 
-    it('accepts elevenlabs with apiKey and voiceId', () => {
+    it('accepts elevenlabs with a key and voiceId', () => {
       const result = ttsProviderSchema.safeParse({
         provider: 'elevenlabs',
-        apiKey: 'el_abc',
+        keys: { elevenlabs: 'el_abc' },
         voiceId: 'voice_123',
       });
       expect(result.success).toBe(true);
       expect(result.data?.voiceId).toBe('voice_123');
     });
 
-    it('accepts openai with apiKey', () => {
+    it('accepts openai with a key', () => {
       const result = ttsProviderSchema.safeParse({
         provider: 'openai',
-        apiKey: 'sk-abc',
+        keys: { openai: 'sk-abc' },
       });
       expect(result.success).toBe(true);
     });
 
-    it('accepts minimax with apiKey and voiceId', () => {
+    it('accepts minimax with a key and voiceId', () => {
       const result = ttsProviderSchema.safeParse({
         provider: 'minimax',
-        apiKey: 'mm_abc',
+        keys: { minimax: 'mm_abc' },
         voiceId: 'default',
       });
       expect(result.success).toBe(true);

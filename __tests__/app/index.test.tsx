@@ -93,19 +93,6 @@ describe('ChatScreen — header', () => {
     expect(screen.getByText('66.8K tok used today')).toBeTruthy();
   });
 
-  /** Below 90% of the 150K default limit, so the banner stays away. */
-  it('hides the budget warning under the limit', async () => {
-    await render(<ChatScreen />);
-    expect(screen.queryByTestId('budget-warning')).toBeNull();
-  });
-
-  it('warns once usage crosses 90% of the daily budget', async () => {
-    mockUsage = { inputTokens: 100_000, outputTokens: 42_300, totalTokens: 142_300 };
-    await render(<ChatScreen />);
-    expect(screen.getByTestId('budget-warning')).toBeTruthy();
-    expect(screen.getByText(/142.3K tok today/)).toBeTruthy();
-  });
-
   it('shows the active profile as a chip that opens the switcher', async () => {
     await render(<ChatScreen />);
     expect(screen.getByLabelText('Switch profile')).toBeTruthy();

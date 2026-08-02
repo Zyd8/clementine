@@ -41,8 +41,12 @@ type ProfilesState = {
   hydrate: () => Promise<void>;
 };
 
-/** Two uppercase characters, as the design's `maxlength=2` input implies. */
-const toAvatar = (source: string): string => source.slice(0, 2).toUpperCase();
+/**
+ * Two uppercase characters, as the design's `maxlength=2` input implies.
+ * A `file://` URI is an uploaded avatar image and must pass through intact.
+ */
+const toAvatar = (source: string): string =>
+  source.startsWith('file://') ? source : source.slice(0, 2).toUpperCase();
 
 const implicitProfile = (): Profile => ({
   id: DEFAULT_PROFILE_ID,

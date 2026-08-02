@@ -30,7 +30,7 @@ export type Recorder = {
 };
 
 /** Whisper models expect 16kHz mono; sending it directly avoids a resample. */
-const WHISPER_FORMAT = {
+export const RECORDING_FORMAT = {
   ...RecordingPresets.HIGH_QUALITY,
   sampleRate: 16_000,
   numberOfChannels: 1,
@@ -38,6 +38,11 @@ const WHISPER_FORMAT = {
   // the level reads as constant silence, the VAD never hears speech start,
   // and a turn never auto-sends.
   isMeteringEnabled: true,
+  // Barge-in needs the mic open while the agent is speaking, so the mic hears
+  // the speaker. This source asks the platform for echo cancellation and
+  // automatic gain control where the hardware has them — without it the
+  // reply reliably interrupts itself.
+  audioSource: 'voice_communication' as const,
 };
 
 /**
@@ -75,8 +80,14 @@ export function createRecorder(recorder: AudioRecorderLike): Recorder {
       if (recording) return;
       // Without this Android records through the earpiece route and the
       // level never rises above room tone.
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await recorder.prepareToRecordAsync(WHISPER_FORMAT);
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        // playAndRecord otherwise routes to the earpiece on iOS, which makes
+        // the agent inaudible during the barge-in overlap.
+        shouldRouteThroughEarpiece: false,
+      });
+      await recorder.prepareToRecordAsync(RECORDING_FORMAT);
       recorder.record();
       recording = true;
     },

@@ -217,3 +217,184 @@ describe('VAD client', () => {
     });
   });
 });
+
+/**
+ * A fixed threshold assumes a quiet room. In a room with a fan, a TV, or
+ * traffic, the ambient level sits permanently above it: speech never "ends",
+ * the silence countdown never starts, and every turn runs to the max
+ * recording cap before it is sent. The floor has to be learned from the room.
+ */
+describe('VAD in a noisy room', () => {
+  let callbacks: jest.Mocked<VadCallbacks>;
+  let client: VadClient;
+
+  const ROOM_TONE = 0.35;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    callbacks = {
+      onSpeechStart: jest.fn(),
+      onEndOfSpeech: jest.fn(),
+      onMaxDuration: jest.fn(),
+    };
+    client = createVadClient(callbacks, { silenceTimeoutMs: 900 });
+  });
+
+  afterEach(() => {
+    client.destroy();
+    jest.useRealTimers();
+  });
+
+  /** Sustained room tone is not speech, however far above a fixed 0.1 it is. */
+  it('does not hear steady background noise as speech', () => {
+    client.start();
+    for (let i = 0; i < 30; i++) client.pushLevel(ROOM_TONE);
+
+    expect(callbacks.onSpeechStart).not.toHaveBeenCalled();
+    expect(client.state()).toBe('SILENT');
+  });
+
+  it('still hears real speech over that noise', () => {
+    client.start();
+    for (let i = 0; i < 30; i++) client.pushLevel(ROOM_TONE);
+
+    client.pushLevel(0.8);
+    expect(callbacks.onSpeechStart).toHaveBeenCalledTimes(1);
+    expect(client.state()).toBe('SPEAKING');
+  });
+
+  /**
+   * The actual bug: dropping back to room tone has to count as silence, or
+   * the turn only ever ends at the max-duration cap.
+   */
+  it('ends the turn when speech drops back to room tone', () => {
+    client.start();
+    for (let i = 0; i < 30; i++) client.pushLevel(ROOM_TONE);
+    client.pushLevel(0.8);
+    expect(client.state()).toBe('SPEAKING');
+
+    for (let i = 0; i < 5; i++) client.pushLevel(ROOM_TONE);
+    jest.advanceTimersByTime(900);
+
+    expect(callbacks.onEndOfSpeech).toHaveBeenCalledTimes(1);
+    expect(callbacks.onMaxDuration).not.toHaveBeenCalled();
+  });
+
+  /** A quiet room must not become insensitive — the floor has a minimum. */
+  it('keeps a floor in a silent room so faint speech still registers', () => {
+    client.start();
+    for (let i = 0; i < 30; i++) client.pushLevel(0);
+
+    client.pushLevel(0.15);
+    expect(callbacks.onSpeechStart).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A step up in noise is indistinguishable from someone starting to talk, so
+   * the fan does trip speech start. What must not happen is the turn staying
+   * open until the cap: sound that never stops gets absorbed as the room.
+   */
+  it('re-learns a room that gets louder instead of recording to the cap', () => {
+    client.start();
+    for (let i = 0; i < 20; i++) client.pushLevel(0.1);
+    // Someone turns on a fan, and it stays on.
+    for (let i = 0; i < 60; i++) client.pushLevel(0.4);
+    jest.advanceTimersByTime(900);
+
+    expect(callbacks.onEndOfSpeech).toHaveBeenCalledTimes(1);
+    expect(callbacks.onMaxDuration).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Learning the floor must not swallow someone who starts talking straight
+   * away — the floor tracks downward instantly, so an opening word cannot
+   * raise it.
+   */
+  it('hears speech that starts immediately, before any quiet is sampled', () => {
+    client.start();
+    client.pushLevel(0.9);
+
+    expect(callbacks.onSpeechStart).toHaveBeenCalledTimes(1);
+  });
+
+  /** Brief dips inside a sentence must not end the turn early. */
+  it('rides out a pause between words', () => {
+    client.start();
+    for (let i = 0; i < 20; i++) client.pushLevel(ROOM_TONE);
+    client.pushLevel(0.8);
+
+    // A short gap, then speech resumes before the silence timeout elapses.
+    client.pushLevel(ROOM_TONE);
+    jest.advanceTimersByTime(400);
+    client.pushLevel(0.8);
+    jest.advanceTimersByTime(900);
+
+    expect(callbacks.onEndOfSpeech).not.toHaveBeenCalled();
+    expect(client.state()).toBe('SPEAKING');
+  });
+
+  it('exposes the threshold it settled on', () => {
+    client.start();
+    for (let i = 0; i < 30; i++) client.pushLevel(ROOM_TONE);
+
+    expect(client.speechThreshold()).toBeGreaterThan(ROOM_TONE);
+    expect(client.speechThreshold()).toBeLessThan(1);
+  });
+});
+
+/**
+ * The room does not change between one sentence and the next. Relearning it
+ * from scratch every turn dropped the threshold to its conservative seed for the
+ * first samples of every turn — and the barge-in bar is derived from that
+ * threshold, so the agent's own echo cleared it and cut the reply off.
+ */
+describe('VAD across turns', () => {
+  let callbacks: jest.Mocked<VadCallbacks>;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    callbacks = {
+      onSpeechStart: jest.fn(),
+      onEndOfSpeech: jest.fn(),
+      onMaxDuration: jest.fn(),
+    };
+  });
+
+  afterEach(() => jest.useRealTimers());
+
+  it('starts from the floor the previous turn learned', () => {
+    const client = createVadClient(callbacks, { initialNoiseFloor: 0.35 });
+    client.start();
+
+    // Room tone that a fresh client would have to learn is silent from
+    // the very first sample.
+    client.pushLevel(0.35);
+
+    expect(callbacks.onSpeechStart).not.toHaveBeenCalled();
+    expect(client.speechThreshold()).toBeGreaterThan(0.35);
+    client.destroy();
+  });
+
+  it('holds that floor across a stop and restart', () => {
+    const client = createVadClient(callbacks, { initialNoiseFloor: 0.35 });
+    client.start();
+    client.pushLevel(0.9);
+    client.destroy();
+
+    client.start();
+    client.pushLevel(0.35);
+
+    expect(callbacks.onSpeechStart).toHaveBeenCalledTimes(1); // only the 0.9
+    client.destroy();
+  });
+
+  /** A genuinely quieter room still wins — the floor tracks down instantly. */
+  it('drops to a quieter room within one sample', () => {
+    const client = createVadClient(callbacks, { initialNoiseFloor: 0.35 });
+    client.start();
+    client.pushLevel(0.02);
+
+    expect(client.speechThreshold()).toBeLessThan(0.2);
+    client.destroy();
+  });
+});

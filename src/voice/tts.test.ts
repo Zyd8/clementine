@@ -82,37 +82,16 @@ describe('TTS provider interface', () => {
   });
 
   // ---- Edge TTS provider methods ----
+  // speak()'s full pipeline (WSS → mp3 → playback) is exercised in
+  // ./edgeTts.test.ts with an injected fake socket. Here only the lifecycle
+  // that does not touch the network is covered.
 
   describe('Edge TTS provider', () => {
-    it('speak calls onSentenceEnd and onAllDone synchronously', async () => {
+    it('creates an edge provider', () => {
       const cbs = makeCbs();
       const provider = createTtsProvider({ provider: 'edge' }, cbs);
-
+      expect(provider).toBeDefined();
       expect(provider.isPlaying()).toBe(false);
-      await provider.speak('Hello.');
-
-      expect(cbs.onSentenceEnd).toHaveBeenCalledTimes(1);
-      expect(cbs.onAllDone).toHaveBeenCalledTimes(1);
-      expect(cbs.onError).not.toHaveBeenCalled();
-      expect(provider.isPlaying()).toBe(false);
-    });
-
-    it('speak captures callback errors and routes to onError', async () => {
-      const cbs: jest.Mocked<TtsCallbacks> = {
-        onSentenceEnd: jest.fn().mockImplementation(() => {
-          throw new Error('callback boom');
-        }),
-        onAllDone: jest.fn(),
-        onError: jest.fn(),
-      };
-      const provider = createTtsProvider({ provider: 'edge' }, cbs);
-
-      await expect(provider.speak('Hello.')).rejects.toThrow('callback boom');
-
-      expect(cbs.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'callback boom' }));
-      expect(provider.isPlaying()).toBe(false);
-      // onAllDone should NOT have been called (onSentenceEnd threw first)
-      expect(cbs.onAllDone).not.toHaveBeenCalled();
     });
 
     it('stop sets isPlaying to false', async () => {
@@ -133,30 +112,35 @@ describe('TTS provider interface', () => {
   // ---- ElevenLabs TTS provider methods ----
 
   describe('ElevenLabs TTS provider', () => {
-    it('speak with valid key succeeds and calls callbacks', async () => {
+    /**
+     * There is no synthesis behind ElevenLabs yet. It used to fire the done
+     * callbacks anyway, which reported the reply spoken while the phone was
+     * silent — a finished turn with no audio and nothing to explain it. Say
+     * so instead, and name a voice that works.
+     */
+    it('refuses to speak rather than reporting a silent reply as done', async () => {
       const cbs = makeCbs();
       const provider = createTtsProvider(
         { provider: 'elevenlabs', apiKey: 'key1', voiceId: 'v1' },
         cbs,
       );
 
-      await provider.speak('Hello.');
+      await expect(provider.speak('Hello.')).rejects.toThrow(/not implemented/i);
 
-      expect(cbs.onSentenceEnd).toHaveBeenCalledTimes(1);
-      expect(cbs.onAllDone).toHaveBeenCalledTimes(1);
-      expect(cbs.onError).not.toHaveBeenCalled();
+      expect(cbs.onSentenceEnd).not.toHaveBeenCalled();
+      expect(cbs.onAllDone).not.toHaveBeenCalled();
+      expect(cbs.onError).toHaveBeenCalled();
       expect(provider.isPlaying()).toBe(false);
     });
 
-    it('speak without apiKey throws', async () => {
+    it('points at a voice that does work', async () => {
       const cbs = makeCbs();
       const provider = createTtsProvider(
         { provider: 'elevenlabs', apiKey: '', voiceId: 'v1' },
         cbs,
       );
 
-      await expect(provider.speak('Hello.')).rejects.toThrow('ElevenLabs API key is required.');
-      expect(cbs.onError).not.toHaveBeenCalled();
+      await expect(provider.speak('Hello.')).rejects.toThrow(/MiniMax|Edge|device/);
     });
 
     it('stop sets isPlaying to false', async () => {
@@ -183,30 +167,17 @@ describe('TTS provider interface', () => {
   // ---- OpenAI TTS provider methods ----
 
   describe('OpenAI TTS provider', () => {
-    it('speak with valid key succeeds and calls callbacks', async () => {
+    /** Same contract as ElevenLabs — see the note there. */
+    it('refuses to speak rather than reporting a silent reply as done', async () => {
       const cbs = makeCbs();
-      const provider = createTtsProvider(
-        { provider: 'openai', apiKey: 'key1' },
-        cbs,
-      );
+      const provider = createTtsProvider({ provider: 'openai', apiKey: 'key1' }, cbs);
 
-      await provider.speak('Hello.');
+      await expect(provider.speak('Hello.')).rejects.toThrow(/not implemented/i);
 
-      expect(cbs.onSentenceEnd).toHaveBeenCalledTimes(1);
-      expect(cbs.onAllDone).toHaveBeenCalledTimes(1);
-      expect(cbs.onError).not.toHaveBeenCalled();
+      expect(cbs.onSentenceEnd).not.toHaveBeenCalled();
+      expect(cbs.onAllDone).not.toHaveBeenCalled();
+      expect(cbs.onError).toHaveBeenCalled();
       expect(provider.isPlaying()).toBe(false);
-    });
-
-    it('speak without apiKey throws', async () => {
-      const cbs = makeCbs();
-      const provider = createTtsProvider(
-        { provider: 'openai', apiKey: '' },
-        cbs,
-      );
-
-      await expect(provider.speak('Hello.')).rejects.toThrow('OpenAI API key is required for TTS.');
-      expect(cbs.onError).not.toHaveBeenCalled();
     });
 
     it('stop sets isPlaying to false', async () => {
@@ -233,7 +204,24 @@ describe('TTS provider interface', () => {
   // ---- MiniMax TTS provider methods ----
 
   describe('MiniMax TTS provider', () => {
-    it('speak with valid key succeeds and calls callbacks', async () => {
+    /**
+     * MiniMax is wired to the real T2A endpoint — `minimaxTts.test.ts` covers
+     * the request and playback in detail. All this needs to prove is that the
+     * factory hands back the real provider and not the old stub: it must call
+     * the API before reporting anything spoken.
+     */
+    it('synthesizes through the API before reporting a sentence spoken', async () => {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: { audio: '01020304', status: 2 },
+          base_resp: { status_code: 0, status_msg: 'success' },
+        }),
+        text: async () => '',
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
       const cbs = makeCbs();
       const provider = createTtsProvider(
         { provider: 'minimax', apiKey: 'key1', voiceId: 'default' },
@@ -242,6 +230,10 @@ describe('TTS provider interface', () => {
 
       await provider.speak('Hello.');
 
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('minimax'),
+        expect.objectContaining({ method: 'POST' }),
+      );
       expect(cbs.onSentenceEnd).toHaveBeenCalledTimes(1);
       expect(cbs.onAllDone).toHaveBeenCalledTimes(1);
       expect(cbs.onError).not.toHaveBeenCalled();

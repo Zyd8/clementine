@@ -16,7 +16,12 @@ import { z } from 'zod';
 
 export const asrProviderSchema = z.object({
   provider: z.enum(['groq', 'deepgram', 'openai']),
-  apiKey: z.string().optional(),
+  /**
+   * One key per provider, not one key per kind. Switching from Groq to
+   * Deepgram used to carry Groq's key across, so the new provider was called
+   * with a credential it would reject — and going back had lost the original.
+   */
+  keys: z.record(z.string(), z.string()).default({}),
 });
 
 export type AsrProviderConfig = z.infer<typeof asrProviderSchema>;
@@ -29,7 +34,8 @@ export const ttsProviderSchema = z.object({
   // requires rotating DRM tokens and breaks without notice — not something to
   // put in front of every reply.
   provider: z.enum(['device', 'edge', 'elevenlabs', 'openai', 'minimax']),
-  apiKey: z.string().optional(),
+  /** One key per provider — see `asrProviderSchema.keys`. */
+  keys: z.record(z.string(), z.string()).default({}),
   voiceId: z.string().optional(),
 });
 
@@ -42,8 +48,8 @@ export type InterruptBehavior = 'stop_speech_only' | 'stop_speech_and_run';
 // ---- Full voice profile ----
 
 export const voiceProfileSchema = z.object({
-  asr: asrProviderSchema.default({ provider: 'groq' }),
-  tts: ttsProviderSchema.default({ provider: 'device' }),
+  asr: asrProviderSchema.default({ provider: 'groq', keys: {} }),
+  tts: ttsProviderSchema.default({ provider: 'device', keys: {} }),
   interruptBehavior: z
     .enum(['stop_speech_only', 'stop_speech_and_run'])
     .default('stop_speech_and_run'),
@@ -59,6 +65,12 @@ export const voiceProfileSchema = z.object({
     .min(1000)
     .max(300_000)
     .default(60_000),
+  /**
+   * How far above the room's measured noise floor a level must reach to count
+   * as speech. The default is tuned for a normal room; raise it if the mic
+   * triggers on background noise, lower it if quiet speech is missed.
+   */
+  vadNoiseMargin: z.number().min(0.02).max(0.5).default(0.12),
 });
 
 export type VoiceProfile = z.infer<typeof voiceProfileSchema>;

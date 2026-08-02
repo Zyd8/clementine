@@ -52,10 +52,22 @@ describe('ProfilesScreen', () => {
     expect(useProfilesStore.getState().profiles[0]?.name).toBe('personal');
   });
 
-  it('edits the avatar, capped at two uppercase characters', async () => {
+  it('edits the avatar by picking an image, which is saved locally', async () => {
     await render(<ProfilesScreen />);
-    fireEvent.changeText(screen.getByLabelText('Avatar for default'), 'pr');
-    expect(useProfilesStore.getState().profiles[0]?.avatar).toBe('PR');
+    fireEvent.press(screen.getByLabelText('Change avatar for default'));
+    await waitFor(() =>
+      expect(useProfilesStore.getState().profiles[0]?.avatar).toMatch(
+        /^file:\/\/\/documents\/avatars\/default\.jpg$/,
+      ),
+    );
+  });
+
+  it('shows the picked image avatar as an image, not initials', async () => {
+    await render(<ProfilesScreen />);
+    fireEvent.press(screen.getByLabelText('Change avatar for default'));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Profile avatar image')).toBeTruthy(),
+    );
   });
 
   it('adds a profile and switches to it', async () => {
@@ -79,13 +91,39 @@ describe('ProfilesScreen', () => {
     expect(screen.getByText(/single profile server-side/)).toBeTruthy();
   });
 
-  it('disconnects the instance on request', async () => {
+  it('disconnects the instance only after confirming the dialog', async () => {
     const disconnect = jest.fn().mockResolvedValue(undefined);
     useConnectionStore.setState({ disconnect });
 
     await render(<ProfilesScreen />);
     fireEvent.press(screen.getByLabelText('Disconnect hermes instance'));
-    expect(disconnect).toHaveBeenCalled();
+
+    // First tap must NOT disconnect — it opens the confirmation dialog.
+    expect(disconnect).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        screen.getByText('Disconnect this Hermes instance?'),
+      ).toBeTruthy(),
+    );
+
+    fireEvent.press(screen.getByText('DISCONNECT'));
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not disconnect when the confirmation dialog is cancelled', async () => {
+    const disconnect = jest.fn().mockResolvedValue(undefined);
+    useConnectionStore.setState({ disconnect });
+
+    await render(<ProfilesScreen />);
+    fireEvent.press(screen.getByLabelText('Disconnect hermes instance'));
+    await waitFor(() => expect(screen.getByText('CANCEL')).toBeTruthy());
+    fireEvent.press(screen.getByText('CANCEL'));
+    expect(disconnect).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        screen.queryByText('Disconnect this Hermes instance?'),
+      ).toBeNull(),
+    );
   });
 
   it('drops the disconnect action when nothing is connected', async () => {

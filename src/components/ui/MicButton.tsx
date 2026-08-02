@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
+import { SpeechPulse } from '@/components/ui/SpeechPulse';
 import { useTheme } from '@/hooks/useTheme';
 import type { VoiceChatState } from '@/types/voice';
 
@@ -11,6 +12,12 @@ type MicButtonProps = {
   onPress: () => void;
   /** 64 in the voice overlay, 46 in the chat composer. */
   size?: number;
+  /**
+   * Live input level, 0–1. Above the speech floor the button wears a pulsing
+   * green ring — confirmation that the mic is hearing *you*, which a static
+   * "listening" label cannot give.
+   */
+  level?: number;
   testID?: string;
 };
 
@@ -26,7 +33,13 @@ type MicButtonProps = {
  * TAP semantics (not hold) — matches the interaction contract:
  * tap once to start, tap again to cancel, tap during playback to interrupt.
  */
-export function MicButton({ voiceState, onPress, size = 64, testID }: MicButtonProps) {
+export function MicButton({
+  voiceState,
+  onPress,
+  size = 64,
+  level = 0,
+  testID,
+}: MicButtonProps) {
   const theme = useTheme();
 
   const isActive = voiceState === 'LISTENING';
@@ -83,6 +96,12 @@ export function MicButton({ voiceState, onPress, size = 64, testID }: MicButtonP
         },
       ]}
     >
+      <SpeechPulse
+        level={level}
+        listening={isActive}
+        {...(testID ? { testID: `${testID}-speech` } : {})}
+      />
+
       {/* Typographic, not an emoji: DESIGN.md keeps iconography to glyphs so
           the surface reads as a terminal. A filled dot is the record mark —
           it says "capturing" without pulling in an icon font. */}

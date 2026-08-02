@@ -46,4 +46,24 @@ describe('Avatar', () => {
     expect(style.height).toBe(34);
     expect(flatten(screen.getByText('PR').props.style).fontSize).toBeCloseTo(34 * 0.38);
   });
+
+  /** An uploaded avatar is a locally saved image, not initials. */
+  it('renders an image when given a file URI', async () => {
+    await render(<Avatar initials="file:///documents/avatars/default.jpg" size={34} testID="a" />);
+    const image = screen.getByLabelText('Profile avatar image');
+    expect(image.props.source).toEqual({
+      uri: 'file:///documents/avatars/default.jpg',
+    });
+    // No initials text for an image avatar.
+    expect(screen.queryByText('fi')).toBeNull();
+  });
+
+  it('keeps the gold ring for an image avatar too', async () => {
+    await render(
+      <Avatar initials="file:///documents/avatars/default.jpg" testID="a" />,
+    );
+    expect(flatten(screen.getByTestId('a').props.style).borderColor).toBe(
+      darkTheme.colors.gold,
+    );
+  });
 });

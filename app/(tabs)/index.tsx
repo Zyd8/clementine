@@ -11,7 +11,6 @@ import { MicButton } from '@/components/ui/MicButton';
 import { useChat } from '@/hooks/useChat';
 import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
-import { useBudgetStore } from '@/stores/budget';
 import { useChatStore, type FeedItem } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
 import { useProfilesStore } from '@/stores/profiles';
@@ -36,7 +35,6 @@ export default function ChatScreen() {
   const feed = useChatStore((s) => s.feed(profileId));
   const activeRun = useChatStore((s) => s.activeRun(profileId));
   const usage = useUsageStore((s) => s.total(profileId));
-  const isOverBudget = useBudgetStore((s) => s.isOverBudget);
 
   const { send, stop, isStreaming } = useChat(profileId);
   const [draft, setDraft] = useState('');
@@ -205,7 +203,7 @@ export default function ChatScreen() {
           onPress={() => setPickerOpen(true)}
           style={{ alignItems: 'center', flexDirection: 'row', gap: 6 }}
         >
-          <Avatar initials={avatar} size={26} />
+          <Avatar initials={avatar} size={34} />
           <Text
             style={{
               color: theme.colors.ink,
@@ -253,37 +251,12 @@ export default function ChatScreen() {
                 {`${formatTokens(usage.totalTokens)} used today`}
               </Text>
             </View>
-
-            {isOverBudget(usage.totalTokens) ? (
-              <View
-                testID="budget-warning"
-                style={{
-                  alignSelf: 'center',
-                  backgroundColor: theme.colors.canvasRaised,
-                  borderColor: theme.colors.goldDim,
-                  borderRadius: theme.radius.sm,
-                  borderWidth: 1,
-                  paddingHorizontal: 10,
-                  paddingVertical: 8,
-                }}
-              >
-                <Text
-                  style={{
-                    color: theme.colors.gold,
-                    fontFamily: theme.fonts.regular,
-                    fontSize: theme.type(11),
-                  }}
-                >
-                  {`⚠ this endpoint has used ${formatTokens(usage.totalTokens)} today`}
-                </Text>
-              </View>
-            ) : null}
           </View>
         }
         ListFooterComponent={
           showThinking ? (
             <View style={{ alignItems: 'flex-start', flexDirection: 'row', gap: 8 }}>
-              <Avatar initials={avatar} size={24} />
+              <Avatar initials={avatar} size={30} />
               <ThinkingDots testID="thinking" />
             </View>
           ) : null

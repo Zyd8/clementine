@@ -40,6 +40,11 @@ type VoiceProfileState = {
   setProfile: (profile: VoiceProfile) => Promise<void>;
   updateAsrConfig: (config: Partial<AsrProviderConfig>) => Promise<void>;
   updateTtsConfig: (config: Partial<TtsProviderConfig>) => Promise<void>;
+  /** Tune how far above room noise counts as speech. */
+  setVadNoiseMargin: (margin: number) => Promise<void>;
+  /** Store one provider's key without touching any other provider's. */
+  setAsrKey: (provider: string, key: string) => Promise<void>;
+  setTtsKey: (provider: string, key: string) => Promise<void>;
   hydrate: () => Promise<void>;
   reset: () => Promise<void>;
 };
@@ -77,6 +82,32 @@ export const useVoiceProfileStore = create<VoiceProfileState>((set, get) => ({
     const updated: VoiceProfile = {
       ...current,
       tts: { ...current.tts, ...config },
+    };
+    set({ profile: updated });
+    await persist(updated);
+  },
+
+  setVadNoiseMargin: async (margin: number): Promise<void> => {
+    const updated: VoiceProfile = { ...get().profile, vadNoiseMargin: margin };
+    set({ profile: updated });
+    await persist(updated);
+  },
+
+  setAsrKey: async (provider: string, key: string): Promise<void> => {
+    const current = get().profile;
+    const updated: VoiceProfile = {
+      ...current,
+      asr: { ...current.asr, keys: { ...current.asr.keys, [provider]: key } },
+    };
+    set({ profile: updated });
+    await persist(updated);
+  },
+
+  setTtsKey: async (provider: string, key: string): Promise<void> => {
+    const current = get().profile;
+    const updated: VoiceProfile = {
+      ...current,
+      tts: { ...current.tts, keys: { ...current.tts.keys, [provider]: key } },
     };
     set({ profile: updated });
     await persist(updated);

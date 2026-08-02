@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/react-native';
+import { File } from 'expo-file-system';
 
 import type { AsrProviderConfig } from '@/types/voice';
 
@@ -50,7 +51,7 @@ export interface AsrProvider {
  * network call over a clip this app records itself.
  */
 export function createAsrProvider(
-  config: AsrProviderConfig,
+  config: { provider: AsrProviderConfig['provider']; apiKey?: string },
   recorder?: Recorder,
 ): AsrProvider {
   switch (config.provider) {
@@ -115,14 +116,17 @@ function createGroqProvider(apiKey: string, recorder?: Recorder): AsrProvider {
       const clip = await mic.stop();
       if (cancelled || !clip) return '';
 
-      // React Native's FormData takes a file descriptor rather than a Blob;
-      // the clip never has to be read into JS memory.
+      // A `File`, not React Native's `{ uri, name, type }` descriptor.
+      //
+      // That descriptor only ever worked because React Native's own fetch
+      // handed the uri to the native networking layer to stream. Expo's fetch
+      // has replaced it and encodes multipart in JS, where a part must be a
+      // string, a Blob, or something exposing `bytes()` — a bare uri throws
+      // "Unsupported FormDataPart implementation" and the clip never leaves
+      // the phone. `File` implements Blob, so it satisfies that contract and
+      // carries its own filename and mime type.
       const form = new FormData();
-      form.append('file', {
-        uri: clip,
-        name: 'speech.m4a',
-        type: 'audio/m4a',
-      } as unknown as Blob);
+      form.append('file', new File(clip) as unknown as Blob);
       form.append('model', GROQ_MODEL);
       // The agent is driven in English and the prompt surface is English;
       // pinning it stops a noisy clip being "detected" as another language.

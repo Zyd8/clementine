@@ -17,8 +17,9 @@ type ProviderPickerProps<T extends string> = {
   onSelect: (value: T) => void;
   /** Field label for the key, e.g. "ASR API Key". */
   keyLabel: string;
-  apiKey: string;
-  onApiKeyChange: (value: string) => void;
+  /** One key per provider — switching must not carry the previous one over. */
+  keys: Record<string, string>;
+  onKeyChange: (provider: T, value: string) => void;
   testIDPrefix: string;
 };
 
@@ -38,8 +39,8 @@ export function ProviderPicker<T extends string>({
   selected,
   onSelect,
   keyLabel,
-  apiKey,
-  onApiKeyChange,
+  keys,
+  onKeyChange,
   testIDPrefix,
 }: ProviderPickerProps<T>) {
   const theme = useTheme();
@@ -104,8 +105,8 @@ export function ProviderPicker<T extends string>({
               >
                 <Field
                   label={keyLabel}
-                  value={apiKey}
-                  onChangeText={onApiKeyChange}
+                  value={keys[value] ?? ''}
+                  onChangeText={(next) => onKeyChange(value, next)}
                   placeholder="paste the provider's key"
                   secret
                 />

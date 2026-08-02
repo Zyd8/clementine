@@ -241,7 +241,7 @@ export function Bubble({ role, text, streaming, avatar, testID }: BubbleProps) {
   return (
     <View style={{ alignSelf: 'flex-start', flexDirection: 'row', gap: 8, maxWidth: '88%' }}>
       <View style={{ marginTop: 9 }}>
-        <Avatar initials={avatar} size={24} />
+        <Avatar initials={avatar} size={30} />
       </View>
       {body}
     </View>

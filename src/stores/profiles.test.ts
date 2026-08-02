@@ -37,6 +37,29 @@ describe('profiles store', () => {
     expect(useProfilesStore.getState().profiles[0]?.avatar).toBe('WK');
   });
 
+  /** An uploaded avatar is a file URI and must survive setAvatar intact. */
+  it('keeps a file URI avatar as-is', async () => {
+    await useProfilesStore.getState().setAvatar(
+      'default',
+      'file:///documents/avatars/default.jpg',
+    );
+    expect(useProfilesStore.getState().profiles[0]?.avatar).toBe(
+      'file:///documents/avatars/default.jpg',
+    );
+  });
+
+  it('persists a file URI avatar across a restart', async () => {
+    await useProfilesStore.getState().setAvatar(
+      'default',
+      'file:///documents/avatars/default.jpg',
+    );
+    useProfilesStore.setState({ profiles: [], activeId: 'default', hydrated: false });
+    await useProfilesStore.getState().hydrate();
+    expect(useProfilesStore.getState().profiles[0]?.avatar).toBe(
+      'file:///documents/avatars/default.jpg',
+    );
+  });
+
   it('adds a profile and can switch to it', async () => {
     await useProfilesStore.getState().add('work');
     const { profiles } = useProfilesStore.getState();

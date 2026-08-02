@@ -127,6 +127,50 @@ describe('ASR provider interface', () => {
     });
 
     /**
+     * The clip has to arrive as something that can hand over its bytes.
+     *
+     * Expo's fetch replaced React Native's, and it builds the multipart body
+     * in JS: `convertFormDataAsync` accepts a string, a Blob, or anything with
+     * `bytes()`, and throws "Unsupported FormDataPart implementation" on
+     * anything else. React Native's `{ uri, name, type }` file descriptor is
+     * exactly that "anything else" — it was never read, so the mic recorded a
+     * clip and the upload died on the phone before a request was made.
+     *
+     * Mocking `fetch` is what hid this: the failure lives in the body encoder,
+     * which a mocked fetch never reaches. So assert the part's shape here.
+     *
+     * Read back off `append` rather than out of the FormData, because the
+     * global FormData under Jest is Node's — it stringifies any part that is
+     * not a Blob, so the object we passed would not survive to be inspected.
+     * On device it is React Native's, which stores the part untouched.
+     */
+    it('sends the clip as a readable file part, not a bare uri', async () => {
+      respond({ text: 'ok' });
+      const mic = recorder();
+      const appended = jest.spyOn(FormData.prototype, 'append');
+      const provider = createAsrProvider({ provider: 'groq', apiKey: 'k' }, mic);
+
+      await provider.start(jest.fn());
+      await provider.stop();
+
+      const part = appended.mock.calls.find(([field]) => field === 'file')?.[1] as unknown as {
+        uri?: string;
+        name?: string;
+        type?: string;
+        bytes?: () => Promise<Uint8Array>;
+      };
+      expect(part).toBeDefined();
+
+      // The three things convertFormDataAsync reads off the part.
+      expect(typeof part.bytes).toBe('function');
+      expect(await part.bytes!()).toBeInstanceOf(Uint8Array);
+      expect(part.name).toMatch(/\.m4a$/);
+      expect(part.type).toContain('audio');
+      // And it must still be the clip the recorder just wrote.
+      expect(part.uri).toBe('file:///clip.m4a');
+    });
+
+    /**
      * 401 is a bad key and 429 is the daily cap. Both are the user's to fix,
      * so the status has to survive into the message rather than becoming a
      * generic failure.

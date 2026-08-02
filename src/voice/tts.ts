@@ -3,6 +3,9 @@ import * as Speech from 'expo-speech';
 
 import type { TtsProviderConfig } from '@/types/voice';
 
+import { createEdgeTtsProvider as realEdgeProvider } from './edgeTts';
+import { createMiniMaxTtsProvider as realMiniMaxProvider } from './minimaxTts';
+
 /**
  * TTS (Text-to-Speech) provider interface.
  *
@@ -48,18 +51,22 @@ export interface TtsProvider {
  * Create a TTS provider for the given config.
  */
 export function createTtsProvider(
-  config: TtsProviderConfig,
+  config: {
+    provider: TtsProviderConfig['provider'];
+    apiKey?: string;
+    voiceId?: string;
+  },
   callbacks: TtsCallbacks,
 ): TtsProvider {
   switch (config.provider) {
     case 'device':
       return createDeviceTtsProvider(callbacks);
     case 'edge':
-      return createEdgeTtsProvider(callbacks);
+      return createEdgeTtsProvider(callbacks, config.voiceId);
     case 'elevenlabs':
-      return createElevenLabsTtsProvider(config.apiKey ?? '', config.voiceId ?? '', callbacks);
+      return createElevenLabsTtsProvider(callbacks);
     case 'openai':
-      return createOpenAiTtsProvider(config.apiKey ?? '', config.voiceId ?? '', callbacks);
+      return createOpenAiTtsProvider(callbacks);
     case 'minimax':
       return createMiniMaxTtsProvider(config.apiKey ?? '', config.voiceId ?? '', callbacks);
   }
@@ -135,154 +142,63 @@ function createDeviceTtsProvider(callbacks: TtsCallbacks): TtsProvider {
   };
 }
 
-// ---- Edge TTS (free default) ----
+// ---- Edge TTS (free, unofficial Microsoft readaloud endpoint) ----
 
-function createEdgeTtsProvider(callbacks: TtsCallbacks): TtsProvider {
-  let playing = false;
-  let stopped = false;
+// Real implementation lives in ./edgeTts — the WSS + Sec-MS-GEC token dance,
+// MP3 capture and playback. This file only imports it so the provider
+// interface stays the single seam the rest of the app calls.
+function createEdgeTtsProvider(callbacks: TtsCallbacks, voiceId?: string): TtsProvider {
+  return realEdgeProvider(callbacks, voiceId);
+}
 
+// ---- Not yet implemented ----
+
+/**
+ * A provider that says so instead of pretending.
+ *
+ * ElevenLabs and OpenAI TTS have no synthesis behind them yet. They used to
+ * fire `onSentenceEnd` and `onAllDone` regardless, which reported the reply
+ * spoken while the phone stayed silent — the user sees a finished turn and no
+ * audio, with nothing anywhere to say why. Refusing loudly costs the same and
+ * names the fix.
+ *
+ * When one of these is implemented, replace the call here — do not restore
+ * the callbacks without real playback behind them.
+ */
+function createUnimplementedTtsProvider(
+  label: string,
+  callbacks: TtsCallbacks,
+): TtsProvider {
   return {
-    speak: async (text: string): Promise<void> => {
-      stopped = false;
-      playing = true;
-
-      // Real implementation: POST to Edge TTS endpoint, stream audio, play via expo-av.
-      // Edge TTS is an unofficial endpoint — it can break or rate-limit.
-      // On failure, report to Sentry and surface the error rather than silently dropping.
-      try {
-        // TODO: wire real Edge TTS when expo-av/expo-audio are installed.
-        // For now, simulate successful playback.
-        callbacks.onSentenceEnd();
-        callbacks.onAllDone();
-      } catch (error) {
-        playing = false;
-        const err = error instanceof Error ? error : new Error(String(error));
-        Sentry.captureException(err, { tags: { reason: 'voice' } });
-        callbacks.onError(err);
-        throw err;
-      } finally {
-        if (!stopped) {
-          playing = false;
-        }
-      }
+    speak: async (): Promise<void> => {
+      const err = new Error(
+        `${label} speech is not implemented yet. Pick the device voice, Edge, or MiniMax under Settings → Voice.`,
+      );
+      Sentry.captureException(err, { tags: { reason: 'voice' } });
+      callbacks.onError(err);
+      throw err;
     },
-
-    stop: async (): Promise<void> => {
-      stopped = true;
-      playing = false;
-    },
-
-    destroy: (): void => {
-      playing = false;
-    },
-
-    isPlaying: (): boolean => playing,
+    stop: async () => undefined,
+    destroy: () => undefined,
+    isPlaying: () => false,
   };
 }
 
-// ---- ElevenLabs ----
-
-function createElevenLabsTtsProvider(
-  apiKey: string,
-  voiceId: string,
-  callbacks: TtsCallbacks,
-): TtsProvider {
-  let playing = false;
-
-  const failIfNoKey = (): void => {
-    if (!apiKey) {
-      const err = new Error('ElevenLabs API key is required.');
-      Sentry.captureException(err, { tags: { reason: 'voice' } });
-      throw err;
-    }
-  };
-
-  return {
-    speak: async (text: string): Promise<void> => {
-      failIfNoKey();
-      playing = true;
-      // Real: POST to https://api.elevenlabs.io/v1/text-to-speech/{voiceId}
-      callbacks.onSentenceEnd();
-      callbacks.onAllDone();
-      playing = false;
-    },
-    stop: async () => {
-      playing = false;
-    },
-    destroy: () => {
-      playing = false;
-    },
-    isPlaying: () => playing,
-  };
+function createElevenLabsTtsProvider(callbacks: TtsCallbacks): TtsProvider {
+  return createUnimplementedTtsProvider('ElevenLabs', callbacks);
 }
 
-// ---- OpenAI TTS ----
-
-function createOpenAiTtsProvider(
-  apiKey: string,
-  voiceId: string,
-  callbacks: TtsCallbacks,
-): TtsProvider {
-  let playing = false;
-
-  const failIfNoKey = (): void => {
-    if (!apiKey) {
-      const err = new Error('OpenAI API key is required for TTS.');
-      Sentry.captureException(err, { tags: { reason: 'voice' } });
-      throw err;
-    }
-  };
-
-  return {
-    speak: async (text: string): Promise<void> => {
-      failIfNoKey();
-      playing = true;
-      // Real: POST to https://api.openai.com/v1/audio/speech
-      callbacks.onSentenceEnd();
-      callbacks.onAllDone();
-      playing = false;
-    },
-    stop: async () => {
-      playing = false;
-    },
-    destroy: () => {
-      playing = false;
-    },
-    isPlaying: () => playing,
-  };
+function createOpenAiTtsProvider(callbacks: TtsCallbacks): TtsProvider {
+  return createUnimplementedTtsProvider('OpenAI', callbacks);
 }
 
 // ---- MiniMax ----
 
+/** Real synthesis and playback — see `minimaxTts.ts`. */
 function createMiniMaxTtsProvider(
   apiKey: string,
   voiceId: string,
   callbacks: TtsCallbacks,
 ): TtsProvider {
-  let playing = false;
-
-  const failIfNoKey = (): void => {
-    if (!apiKey) {
-      const err = new Error('MiniMax API key is required for TTS.');
-      Sentry.captureException(err, { tags: { reason: 'voice' } });
-      throw err;
-    }
-  };
-
-  return {
-    speak: async (text: string): Promise<void> => {
-      failIfNoKey();
-      playing = true;
-      callbacks.onSentenceEnd();
-      callbacks.onAllDone();
-      playing = false;
-    },
-    stop: async () => {
-      playing = false;
-    },
-    destroy: () => {
-      playing = false;
-    },
-    isPlaying: () => playing,
-  };
+  return realMiniMaxProvider(apiKey, voiceId, callbacks);
 }

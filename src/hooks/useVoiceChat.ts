@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/react-native';
-import { RecordingPresets, useAudioRecorder } from 'expo-audio';
+import { useAudioRecorder } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { createRun, stopRun, streamRunEvents } from '@/api/runs';
@@ -9,10 +9,11 @@ import { useUsageStore } from '@/stores/usage';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
 import type { VoiceChatState } from '@/types/voice';
 import { createAsrProvider, type AsrProvider } from '@/voice/asr';
-import { createRecorder, type Recorder } from '@/voice/recorder';
+import { createRecorder, RECORDING_FORMAT, type Recorder } from '@/voice/recorder';
 import { executeInterrupt } from '@/voice/interrupt';
 import { createSentenceBuffer, type SentenceBuffer } from '@/voice/sentenceBuffer';
 import { createTtsProvider, type TtsProvider } from '@/voice/tts';
+import { createBargeInDetector } from '@/voice/bargeIn';
 import { createVadClient, type VadClient, type VadCallbacks } from '@/voice/vad';
 
 /**
@@ -40,11 +41,33 @@ export function useVoiceChat(profileId: ProfileId = null) {
   const [voiceState, setVoiceState] = useState<VoiceChatState>('IDLE');
   const [liveTranscript, setLiveTranscript] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
+  /**
+   * The level the VAD currently treats as speech, learned from the room.
+   * Surfaced so the "hearing you" ring agrees with the thing that actually
+   * decides the turn is over — a fixed visual floor would glow at room tone
+   * the VAD is correctly ignoring.
+   */
+  const [speechThreshold, setSpeechThreshold] = useState(0.12);
+  // What the voice pipeline is doing right now, surfaced on the voice screen
+  // so a stuck or failed step is visible instead of reading as "listening".
+  const [voiceStatus, setVoiceStatus] = useState('');
+
+  const setStatus = useCallback((message: string) => {
+    setVoiceStatus(message);
+  }, []);
 
   // One recorder for the hook's lifetime. `useAudioRecorder` owns the native
   // handle; the adapter around it is what the ASR provider talks to. Lazy
   // state rather than a ref, because a ref may not be written during render.
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  //
+  // The recorder must be CONSTRUCTED with metering enabled: expo-audio reads
+  // isMeteringEnabled at construction (`new AudioRecorder(options)`), not at
+  // prepare time. Without it `getStatus().metering` is undefined, the level
+  // reads as constant silence, and the VAD never hears speech — the app sits
+  // in LISTENING forever. This is the same format the recorder passes to
+  // prepareToRecordAsync; the construction-time flag is what actually enables
+  // the meter.
+  const audioRecorder = useAudioRecorder(RECORDING_FORMAT);
   const [recorder] = useState<Recorder>(() => createRecorder(audioRecorder as never));
 
   // Refs for mutable state that doesn't trigger re-renders and avoids
@@ -55,6 +78,22 @@ export function useVoiceChat(profileId: ProfileId = null) {
   const vadRef = useRef<VadClient | null>(null);
   const sentenceBufRef = useRef<SentenceBuffer>(createSentenceBuffer());
   const inFlight = useRef(false);
+  /**
+   * `enterListening` is defined below and depends (transitively) on `sendRun`,
+   * so `sendRun` cannot close over it directly. A ref breaks the cycle.
+   */
+  const enterListeningRef = useRef<() => Promise<void>>(async () => undefined);
+  /**
+   * The room's noise floor, carried between turns.
+   *
+   * The VAD relearns from the level feed, but a fresh client starts from a
+   * conservative seed — so for the first samples of every turn the threshold
+   * sat far below where the room had already been measured. The barge-in bar
+   * is derived from that threshold, so it collapsed too and the agent's own
+   * echo cut its own reply off. The room is the same one it was a sentence
+   * ago; remember it.
+   */
+  const noiseFloorRef = useRef<number | undefined>(undefined);
   const fullTranscript = useRef('');
 
   // ---- State transition helpers (update both React state and ref) ----
@@ -69,6 +108,7 @@ export function useVoiceChat(profileId: ProfileId = null) {
     setLiveTranscript('');
     fullTranscript.current = '';
     setAudioLevel(0);
+    setStatus('');
 
     try {
       asrRef.current?.cancel();
@@ -79,7 +119,7 @@ export function useVoiceChat(profileId: ProfileId = null) {
     vadRef.current = null;
 
     sentenceBufRef.current.reset();
-  }, [transition]);
+  }, [transition, setStatus]);
 
   // ---- Send the run + stream + TTS ----
 
@@ -91,6 +131,7 @@ export function useVoiceChat(profileId: ProfileId = null) {
       inFlight.current = true;
       transition('PROCESSING');
       setLiveTranscript('');
+      setStatus('Sending to Hermes…');
 
       store.appendUserMessage(profileId, input);
 
@@ -104,21 +145,33 @@ export function useVoiceChat(profileId: ProfileId = null) {
 
         // Set up TTS
         ttsRef.current?.destroy();
-        const tts = createTtsProvider(voiceProfile.tts, {
+        const tts = createTtsProvider({
+          provider: voiceProfile.tts.provider,
+          apiKey: voiceProfile.tts.keys[voiceProfile.tts.provider] ?? '',
+          ...(voiceProfile.tts.voiceId ? { voiceId: voiceProfile.tts.voiceId } : {}),
+        }, {
           onSentenceEnd: () => {
             // Sentence finished — next will auto-play if queued.
           },
           onAllDone: () => {
-            // Only reset to IDLE if we're still in PLAYING.
-            if (stateRef.current === 'PLAYING') {
-              enterIdle();
-            }
+            setStatus('Reply complete');
+            if (stateRef.current !== 'PLAYING') return;
+            // The reply finishing is the cue to listen again — a conversation
+            // does not require a tap between every turn. Deferred by a tick so
+            // sendRun's `finally` clears its in-flight guard first; without
+            // that, enterListening returns early and the mic never reopens.
+            setTimeout(() => {
+              if (stateRef.current !== 'PLAYING') return;
+              void enterListeningRef.current();
+            }, 0);
           },
           onError: (error) => {
             Sentry.captureException(error, { tags: { reason: 'voice' } });
             if (stateRef.current === 'PLAYING' || stateRef.current === 'PROCESSING') {
+              // enterIdle clears the status; set the error AFTER so it survives.
               enterIdle();
             }
+            setStatus(`Voice playback error: ${error.message}`);
           },
         });
         ttsRef.current = tts;
@@ -141,6 +194,7 @@ export function useVoiceChat(profileId: ProfileId = null) {
               });
               if (firstSentence && stateRef.current === 'PROCESSING') {
                 firstSentence = false;
+                setStatus('Speaking…');
                 transition('PLAYING');
               }
             });
@@ -161,13 +215,16 @@ export function useVoiceChat(profileId: ProfileId = null) {
           });
           if (firstSentence && stateRef.current === 'PROCESSING') {
             firstSentence = false;
+            setStatus('Speaking…');
             transition('PLAYING');
           }
         });
 
         // If no sentences ever came through (silent run), just go to idle
         if (stateRef.current === 'PROCESSING') {
+          // enterIdle clears the status; set the notice AFTER so it survives.
           enterIdle();
+          setStatus('No spoken reply — check the chat for the response');
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Voice run failed.';
@@ -175,19 +232,20 @@ export function useVoiceChat(profileId: ProfileId = null) {
           error instanceof Error ? error : new Error(String(error)),
           { tags: { reason: 'voice' } },
         );
-
         if (runId) {
           useChatStore
             .getState()
             .applyEvent(profileId, { type: 'run.failed', message });
         }
+        // enterIdle clears the status; set the error AFTER so it survives.
         enterIdle();
+        setStatus(`Run failed: ${message}`);
       } finally {
         inFlight.current = false;
         useChatStore.getState().setActiveRun(profileId, null);
       }
     },
-    [connection, profileId, voiceProfile.tts, transition, enterIdle],
+    [connection, profileId, voiceProfile.tts, transition, enterIdle, setStatus],
   );
 
   // ---- End-of-speech → auto-send ----
@@ -199,13 +257,22 @@ export function useVoiceChat(profileId: ProfileId = null) {
     // nothing until `stop()` returns — checking first meant every turn was
     // abandoned before it was ever transcribed. Only providers that stream
     // partials populate this before the mic closes.
+    setStatus('Transcribing…');
     try {
       const final = await asrRef.current?.stop();
       if (final) {
         fullTranscript.current = final;
       }
-    } catch {
-      // If ASR stop fails, use what we have.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Transcription failed.';
+      // enterIdle clears the status; set the error AFTER so it survives.
+      enterIdle();
+      setStatus(`Transcription failed: ${message}`);
+      Sentry.captureException(
+        error instanceof Error ? error : new Error(String(error)),
+        { tags: { reason: 'voice' } },
+      );
+      return;
     }
 
     asrRef.current = null;
@@ -214,25 +281,36 @@ export function useVoiceChat(profileId: ProfileId = null) {
 
     const text = fullTranscript.current.trim();
     if (!text) {
+      // enterIdle clears the status; set the notice AFTER so it survives.
       enterIdle();
+      setStatus('No speech detected — try again');
       return;
     }
 
     await sendRun(text);
-  }, [connection, enterIdle, sendRun]);
+  }, [connection, enterIdle, sendRun, setStatus]);
 
   const handleMaxDuration = useCallback(async () => {
     if (!connection || inFlight.current) return;
 
     // Same as end-of-speech: the clip still has to be transcribed, or hitting
     // the recording cap silently discards everything the user just said.
+    setStatus('Max recording time — transcribing…');
     try {
       const final = await asrRef.current?.stop();
       if (final) {
         fullTranscript.current = final;
       }
-    } catch {
-      // Fall through with whatever partial text exists.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Transcription failed.';
+      // enterIdle clears the status; set the error AFTER so it survives.
+      enterIdle();
+      setStatus(`Transcription failed: ${message}`);
+      Sentry.captureException(
+        error instanceof Error ? error : new Error(String(error)),
+        { tags: { reason: 'voice' } },
+      );
+      return;
     }
 
     asrRef.current = null;
@@ -241,12 +319,14 @@ export function useVoiceChat(profileId: ProfileId = null) {
 
     const text = fullTranscript.current.trim();
     if (!text) {
+      // enterIdle clears the status; set the notice AFTER so it survives.
       enterIdle();
+      setStatus('No speech detected — try again');
       return;
     }
 
     await sendRun(text);
-  }, [connection, enterIdle, sendRun]);
+  }, [connection, enterIdle, sendRun, setStatus]);
 
   // ---- Enter LISTENING ----
 
@@ -256,15 +336,23 @@ export function useVoiceChat(profileId: ProfileId = null) {
     transition('LISTENING');
     setLiveTranscript('');
     fullTranscript.current = '';
+    setStatus('Opening microphone…');
 
     // Create ASR provider from the voice profile
-    const asr = createAsrProvider(voiceProfile.asr, recorder);
+    const asr = createAsrProvider(
+      {
+        provider: voiceProfile.asr.provider,
+        apiKey: voiceProfile.asr.keys[voiceProfile.asr.provider] ?? '',
+      },
+      recorder,
+    );
     asrRef.current = asr;
 
     // Create VAD client
     const vadCallbacks: VadCallbacks = {
       onSpeechStart: () => {
         // Speech started — already in LISTENING.
+        setStatus('Listening…');
       },
       onEndOfSpeech: () => {
         void (async () => {
@@ -283,17 +371,44 @@ export function useVoiceChat(profileId: ProfileId = null) {
     const vad = createVadClient(vadCallbacks, {
       silenceTimeoutMs: voiceProfile.endOfSpeechTimeoutMs,
       maxRecordingMs: voiceProfile.maxRecordingMs,
+      noiseMargin: voiceProfile.vadNoiseMargin,
+      ...(noiseFloorRef.current !== undefined
+        ? { initialNoiseFloor: noiseFloorRef.current }
+        : {}),
     });
     vadRef.current = vad;
     vad.start();
 
-    // Start ASR — feeds partial transcripts to liveTranscript
-    await asr.start((result) => {
-      fullTranscript.current = result.transcript;
-      setLiveTranscript(result.transcript);
-    });
+    // Start ASR — feeds partial transcripts to liveTranscript. A failure
+    // here (mic permission denied, recorder error) must not leave the state
+    // machine parked in LISTENING with a silent mic — surface it and return
+    // to IDLE so the screen can say what went wrong.
+    try {
+      await asr.start((result) => {
+        fullTranscript.current = result.transcript;
+        setLiveTranscript(result.transcript);
+      });
+      setStatus('Listening — speak now');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not start the microphone.';
+      Sentry.captureException(
+        error instanceof Error ? error : new Error(String(error)),
+        { tags: { reason: 'voice' } },
+      );
+      asrRef.current = null;
+      vadRef.current?.destroy();
+      vadRef.current = null;
+      // enterIdle clears the status; set the error AFTER so it survives.
+      enterIdle();
+      setStatus(`Mic error: ${message}`);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceProfile, transition]);
+  }, [voiceProfile, transition, handleEndOfSpeech, handleMaxDuration, enterIdle, setStatus]);
+
+  // Keep the ref pointing at the current closure for the auto-relisten above.
+  useEffect(() => {
+    enterListeningRef.current = enterListening;
+  }, [enterListening]);
 
   // ---- Cancel (LISTENING → IDLE, discard recording) ----
 
@@ -377,6 +492,10 @@ export function useVoiceChat(profileId: ProfileId = null) {
     setAudioLevel(level);
     if (vadRef.current) {
       vadRef.current.pushLevel(level);
+      setSpeechThreshold(vadRef.current.speechThreshold());
+      // Remembered continuously, so a turn that ends abruptly still leaves
+      // the room measured for the next one.
+      noiseFloorRef.current = vadRef.current.noiseFloor();
     }
   }, []);
 
@@ -398,10 +517,56 @@ export function useVoiceChat(profileId: ProfileId = null) {
     return () => clearInterval(id);
   }, [voiceState, pushAudioLevel, recorder]);
 
+  /**
+   * Barge-in: listen while the agent speaks, and cut it off when the user
+   * starts talking.
+   *
+   * Interrupting by tapping was never reachable — the ring is not a button —
+   * and a spoken conversation should not need one anyway: talking over
+   * someone IS the interruption.
+   *
+   * The mic is opened purely to meter here; the clip is discarded rather than
+   * transcribed, because it contains the agent's own voice. `enterListening`
+   * then opens a clean recording for what the user is actually saying.
+   */
+  useEffect(() => {
+    if (voiceState !== 'PLAYING') return;
+
+    const detector = createBargeInDetector(speechThreshold);
+    // Set before any await, so the cleanup below can tell a barge-in (which
+    // hands the mic to enterListening) from an ordinary exit (which must give
+    // the mic back). Cancelling in the first case would kill the recording
+    // that the new listening turn had already started.
+    let barged = false;
+
+    void recorder.start();
+
+    const id = setInterval(() => {
+      const level = recorder.level();
+      setAudioLevel(level);
+      if (!detector.push(level)) return;
+
+      barged = true;
+      clearInterval(id);
+      void (async () => {
+        // Discard the metering clip — it is mostly the agent talking.
+        await recorder.cancel();
+        await interruptPlayback();
+      })();
+    }, 100);
+
+    return () => {
+      clearInterval(id);
+      if (!barged) void recorder.cancel();
+    };
+  }, [voiceState, speechThreshold, recorder, interruptPlayback]);
+
   return {
     voiceState,
     liveTranscript,
     audioLevel,
+    speechThreshold,
+    voiceStatus,
     tapMic,
 
     // Audio session interruption handler (for incoming calls, etc.)

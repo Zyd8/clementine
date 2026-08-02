@@ -36,6 +36,16 @@ const config: ExpoConfig = {
   plugins: [
     'expo-router',
     'expo-secure-store',
+    // Profile avatar upload. The permission string is what iOS shows when
+    // the picker first opens; the picker itself needs no storage permission
+    // on Android (system photo picker) but the plugin keeps the build honest.
+    [
+      'expo-image-picker',
+      {
+        photosPermission:
+          'Clementine lets you choose a photo for your profile avatar. It is stored only on this device.',
+      },
+    ],
     // Declares RECORD_AUDIO on Android and the microphone usage string on
     // iOS. whisper.rn has no config plugin of its own, so the recorder's
     // plugin is what makes the mic reachable at all.

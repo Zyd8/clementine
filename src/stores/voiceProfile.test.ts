@@ -6,21 +6,23 @@ import { type VoiceProfile } from '@/types/voice';
 import { useVoiceProfileStore, VOICE_PROFILE_STORAGE_KEY } from './voiceProfile';
 
 const FULL_PROFILE: VoiceProfile = {
-  asr: { provider: 'groq' },
-  tts: { provider: 'edge' },
+  asr: { provider: 'groq', keys: {} },
+  tts: { provider: 'edge', keys: {} },
   interruptBehavior: 'stop_speech_and_run',
   endOfSpeechTimeoutMs: 900,
   maxRecordingMs: 60_000,
+  vadNoiseMargin: 0.12,
 };
 
 const reset = () =>
   useVoiceProfileStore.setState({
     profile: {
-      asr: { provider: 'groq' },
-      tts: { provider: 'device' as const },
+      asr: { provider: 'groq', keys: {} },
+      tts: { provider: 'device' as const, keys: {} },
       interruptBehavior: 'stop_speech_and_run',
       endOfSpeechTimeoutMs: 900,
       maxRecordingMs: 60_000,
+      vadNoiseMargin: 0.12,
     },
     hydrated: false,
   });
@@ -61,33 +63,57 @@ describe('voice profile store', () => {
    * a key entered once survives a restart.
    */
   it('round-trips an entered key through SecureStore', async () => {
-    await useVoiceProfileStore.getState().updateAsrConfig({
-      provider: 'groq',
-      apiKey: 'gsk_entered_by_hand',
-    });
-    await useVoiceProfileStore.getState().updateTtsConfig({
-      provider: 'elevenlabs',
-      apiKey: 'el_entered_by_hand',
-    });
+    await useVoiceProfileStore.getState().updateAsrConfig({ provider: 'groq' });
+    await useVoiceProfileStore.getState().setAsrKey('groq', 'gsk_entered_by_hand');
+    await useVoiceProfileStore.getState().updateTtsConfig({ provider: 'elevenlabs' });
+    await useVoiceProfileStore.getState().setTtsKey('elevenlabs', 'el_entered_by_hand');
 
     // Wipe everything the running app holds, as a relaunch would.
     reset();
     await useVoiceProfileStore.getState().hydrate();
 
-    expect(useVoiceProfileStore.getState().asrConfig().apiKey).toBe(
+    expect(useVoiceProfileStore.getState().asrConfig().keys.groq).toBe(
       'gsk_entered_by_hand',
     );
-    expect(useVoiceProfileStore.getState().ttsConfig().apiKey).toBe(
+    expect(useVoiceProfileStore.getState().ttsConfig().keys.elevenlabs).toBe(
       'el_entered_by_hand',
     );
   });
 
+  /**
+   * The bug per-provider keys exist to fix: entering a Deepgram key used to
+   * overwrite the Groq one, so switching back called Groq with a Deepgram
+   * credential — a 401 with nothing on screen to explain it.
+   */
+  it('keeps each provider\'s key when another provider\'s is set', async () => {
+    await useVoiceProfileStore.getState().setAsrKey('groq', 'gsk_one');
+    await useVoiceProfileStore.getState().setAsrKey('deepgram', 'dg_two');
+
+    expect(useVoiceProfileStore.getState().asrConfig().keys).toEqual({
+      groq: 'gsk_one',
+      deepgram: 'dg_two',
+    });
+  });
+
+  it('keeps ASR and TTS keys in separate maps', async () => {
+    await useVoiceProfileStore.getState().setAsrKey('openai', 'sk_asr');
+    await useVoiceProfileStore.getState().setTtsKey('openai', 'sk_tts');
+
+    expect(useVoiceProfileStore.getState().asrConfig().keys.openai).toBe('sk_asr');
+    expect(useVoiceProfileStore.getState().ttsConfig().keys.openai).toBe('sk_tts');
+  });
+
+  it('switching provider does not disturb any stored key', async () => {
+    await useVoiceProfileStore.getState().setAsrKey('groq', 'gsk_one');
+    await useVoiceProfileStore.getState().updateAsrConfig({ provider: 'deepgram' });
+
+    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('deepgram');
+    expect(useVoiceProfileStore.getState().asrConfig().keys.groq).toBe('gsk_one');
+  });
+
   /** Voice keys are the user's: SecureStore only, never the plain store. */
   it('writes keys to SecureStore and nowhere else', async () => {
-    await useVoiceProfileStore.getState().updateAsrConfig({
-      provider: 'groq',
-      apiKey: 'gsk_secret',
-    });
+    await useVoiceProfileStore.getState().setAsrKey('groq', 'gsk_secret');
 
     const written = (SecureStore.setItemAsync as jest.Mock).mock.calls.at(-1);
     expect(written?.[0]).toBe(VOICE_PROFILE_STORAGE_KEY);
@@ -107,14 +133,14 @@ describe('voice profile store', () => {
       VOICE_PROFILE_STORAGE_KEY,
       JSON.stringify({
         ...FULL_PROFILE,
-        asr: { provider: 'groq', apiKey: 'g_key' },
+        asr: { provider: 'groq', keys: { groq: 'g_key' } },
       }),
     );
 
     await useVoiceProfileStore.getState().hydrate();
 
     expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('groq');
-    expect(useVoiceProfileStore.getState().asrConfig().apiKey).toBe('g_key');
+    expect(useVoiceProfileStore.getState().asrConfig().keys.groq).toBe('g_key');
     expect(useVoiceProfileStore.getState().hydrated).toBe(true);
   });
 
@@ -137,7 +163,10 @@ describe('voice profile store', () => {
   it('discards a stored blob that fails schema validation', async () => {
     await SecureStore.setItemAsync(
       VOICE_PROFILE_STORAGE_KEY,
-      JSON.stringify({ asr: { provider: 'not_a_provider' }, tts: { provider: 'edge' } }),
+      JSON.stringify({
+        asr: { provider: 'not_a_provider', keys: {} },
+        tts: { provider: 'edge', keys: {} },
+      }),
     );
     await useVoiceProfileStore.getState().hydrate();
 
@@ -147,10 +176,7 @@ describe('voice profile store', () => {
   it('updates ASR config independently of TTS config', async () => {
     await useVoiceProfileStore.getState().setProfile(FULL_PROFILE);
 
-    await useVoiceProfileStore.getState().updateAsrConfig({
-      provider: 'groq',
-      apiKey: 'new_key',
-    });
+    await useVoiceProfileStore.getState().updateAsrConfig({ provider: 'groq' });
 
     expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('groq');
     // The point of the test: changing ASR leaves the stored TTS choice alone.
@@ -162,7 +188,6 @@ describe('voice profile store', () => {
 
     await useVoiceProfileStore.getState().updateTtsConfig({
       provider: 'elevenlabs',
-      apiKey: 'el_key',
       voiceId: 'voice_x',
     });
 
@@ -173,7 +198,7 @@ describe('voice profile store', () => {
   it('reset clears to free defaults', async () => {
     await useVoiceProfileStore.getState().setProfile({
       ...FULL_PROFILE,
-      asr: { provider: 'groq', apiKey: 'g_key' },
+      asr: { provider: 'groq', keys: { groq: 'g_key' } },
     });
     await useVoiceProfileStore.getState().reset();
 

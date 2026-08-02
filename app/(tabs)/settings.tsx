@@ -1,9 +1,8 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -11,8 +10,6 @@ import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { ProviderPicker } from '@/components/features/ProviderPicker';
 import { Stepper } from '@/components/ui/Stepper';
 import { useTheme } from '@/hooks/useTheme';
-import { useBudgetStore } from '@/stores/budget';
-import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore, type ThemePreference } from '@/stores/settings';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
 import type { ProviderOption } from '@/components/features/ProviderPicker';
@@ -46,7 +43,7 @@ const TTS_OPTIONS: readonly ProviderOption<TtsProviderConfig['provider']>[] = [
 ];
 
 /**
- * Settings: theme, the two voice provider pickers, and the daily budget.
+ * Settings: theme and the two voice provider pickers.
  *
  * The theme control moved here from the chat header — the design gives it a
  * row of its own showing all three states, rather than a one-label toggle
@@ -72,31 +69,8 @@ export default function SettingsScreen() {
   const updateTtsConfig = useVoiceProfileStore((s) => s.updateTtsConfig);
   const setProfile = useVoiceProfileStore((s) => s.setProfile);
 
-  const connection = useConnectionStore((s) => s.connection);
-  const dailyLimit = useBudgetStore((s) => s.dailyLimit);
-  const setLimit = useBudgetStore((s) => s.setLimit);
-  const [budgetDraft, setBudgetDraft] = useState(String(dailyLimit));
-
-  // Keys are held locally while typing and written straight through, so a
-  // half-typed key is never what the provider is called with.
-  const [asrKey, setAsrKey] = useState(voiceProfile.asr.apiKey ?? '');
-  const [ttsKey, setTtsKey] = useState(voiceProfile.tts.apiKey ?? '');
-
-  const onAsrKeyChange = (apiKey: string) => {
-    setAsrKey(apiKey);
-    void updateAsrConfig({ apiKey });
-  };
-
-  const onTtsKeyChange = (apiKey: string) => {
-    setTtsKey(apiKey);
-    void updateTtsConfig({ apiKey });
-  };
-
-  const onBudgetChange = (text: string) => {
-    const digits = text.replace(/[^0-9]/g, '');
-    setBudgetDraft(digits);
-    void setLimit(Number.parseInt(digits, 10) || 0);
-  };
+  const setAsrKey = useVoiceProfileStore((s) => s.setAsrKey);
+  const setTtsKey = useVoiceProfileStore((s) => s.setTtsKey);
 
   const sectionLabel = (text: string) => (
     <Text
@@ -232,8 +206,8 @@ export default function SettingsScreen() {
             selected={voiceProfile.asr.provider}
             onSelect={(provider) => void updateAsrConfig({ provider })}
             keyLabel="ASR API Key"
-            apiKey={asrKey}
-            onApiKeyChange={onAsrKeyChange}
+            keys={voiceProfile.asr.keys}
+            onKeyChange={setAsrKey}
             testIDPrefix="asr"
           />
         </View>
@@ -245,8 +219,8 @@ export default function SettingsScreen() {
             selected={voiceProfile.tts.provider}
             onSelect={(provider) => void updateTtsConfig({ provider })}
             keyLabel="TTS API Key"
-            apiKey={ttsKey}
-            onApiKeyChange={onTtsKeyChange}
+            keys={voiceProfile.tts.keys}
+            onKeyChange={setTtsKey}
             testIDPrefix="tts"
           />
         </View>
@@ -286,50 +260,6 @@ export default function SettingsScreen() {
               ),
             )}
           </View>
-        </View>
-
-        <View style={{ gap: theme.spacing.sm }}>
-          {sectionLabel(`BUDGET — ${connection?.name ?? 'no instance'}`)}
-          <View
-            style={{ alignItems: 'center', flexDirection: 'row', gap: theme.spacing.sm }}
-          >
-            <TextInput
-              aria-label="Daily token budget"
-              value={budgetDraft}
-              onChangeText={onBudgetChange}
-              keyboardType="number-pad"
-              style={{
-                backgroundColor: theme.colors.canvasRaised,
-                borderColor: theme.colors.steel,
-                borderRadius: theme.radius.sm,
-                borderWidth: 1,
-                color: theme.colors.ink,
-                flex: 1,
-                fontFamily: theme.fonts.regular,
-                fontSize: theme.type(13),
-                paddingHorizontal: 12,
-                paddingVertical: 10,
-              }}
-            />
-            <Text
-              style={{
-                color: theme.colors.inkMuted,
-                fontFamily: theme.fonts.regular,
-                fontSize: theme.type(11),
-              }}
-            >
-              tok / day
-            </Text>
-          </View>
-          <Text
-            style={{
-              color: theme.colors.inkMuted,
-              fontFamily: theme.fonts.regular,
-              fontSize: theme.type(10.5),
-            }}
-          >
-            non-blocking warning only — the app can&apos;t cap what the server does
-          </Text>
         </View>
 
       </ScrollView>

@@ -10,7 +10,7 @@ import { profileKey, type ProfileId } from '@/utils/profile';
  *
  * This is NOT the chat store's per-session `usage` — it persists across
  * app restarts via AsyncStorage. It accumulates a simple running total per
- * profile: no time-window bucketing, no budget math, no per-model breakdown.
+ * profile: no time-window bucketing, no per-model breakdown.
  *
  * MINIMAL by design — the full usage dashboard was trimmed from this phase
  * for a single-user app (see plan/06-usage-telemetry.md).

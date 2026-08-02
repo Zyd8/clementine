@@ -20,8 +20,8 @@ const setup = (
       selected="elevenlabs"
       onSelect={jest.fn()}
       keyLabel="TTS API Key"
-      apiKey=""
-      onApiKeyChange={jest.fn()}
+      keys={{}}
+      onKeyChange={jest.fn()}
       testIDPrefix="tts"
       {...overrides}
     />,
@@ -57,11 +57,32 @@ describe('ProviderPicker', () => {
     expect(onSelect).toHaveBeenCalledWith('openai');
   });
 
-  it('reports the typed key', async () => {
-    const onApiKeyChange = jest.fn();
-    await setup({ onApiKeyChange });
+  it('reports the typed key against the provider it belongs to', async () => {
+    const onKeyChange = jest.fn();
+    await setup({ onKeyChange });
     fireEvent.changeText(screen.getByLabelText('TTS API Key'), 'el_key');
-    expect(onApiKeyChange).toHaveBeenCalledWith('el_key');
+    expect(onKeyChange).toHaveBeenCalledWith('elevenlabs', 'el_key');
+  });
+
+  /**
+   * Each provider keeps its own key. Switching used to carry the previous
+   * provider's key across, so the new one was called with a credential it
+   * would reject — and going back had lost the original.
+   */
+  it('shows each provider its own stored key', async () => {
+    await setup({
+      selected: 'elevenlabs',
+      keys: { elevenlabs: 'el_key', openai: 'oa_key' },
+    });
+    expect(screen.getByLabelText('TTS API Key').props.value).toBe('el_key');
+  });
+
+  it('shows the other provider’s key once it is selected', async () => {
+    await setup({
+      selected: 'openai',
+      keys: { elevenlabs: 'el_key', openai: 'oa_key' },
+    });
+    expect(screen.getByLabelText('TTS API Key').props.value).toBe('oa_key');
   });
 
   /** Paste in, no copy out — masking is what suppresses copy on both platforms. */

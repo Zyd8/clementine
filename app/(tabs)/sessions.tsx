@@ -82,7 +82,7 @@ export default function SessionsScreen() {
             right: 0,
           }}
         >
-          <Avatar initials={activeProfile?.avatar ?? 'DF'} size={22} />
+          <Avatar initials={activeProfile?.avatar ?? 'DF'} size={30} />
           <Text
             numberOfLines={1}
             style={{
