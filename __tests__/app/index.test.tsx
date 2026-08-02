@@ -203,7 +203,16 @@ describe('ChatScreen — composer', () => {
   });
 
   /** Landing at the bottom on open must not be seen sliding into place. */
-  it('jumps to the bottom instantly the first time, not animated', async () => {
+  /**
+   * A streaming reply fires this many times a second (once per token).
+   * Animated scrolls that frequent interrupt each other before any one of
+   * them finishes, so the visible position perpetually lagged behind the
+   * true bottom — reported as the reply looking cut off on screen, while a
+   * tool message (which fires this rarely) reached the bottom fully because
+   * its one animated scroll had time to complete. Always instant avoids the
+   * interruption entirely, on the first paint and on every one after it.
+   */
+  it('always jumps to the bottom instantly, never animated', async () => {
     const scrollSpy = jest
       .spyOn(FlatList.prototype, 'scrollToEnd')
       .mockImplementation(() => undefined);
@@ -212,19 +221,14 @@ describe('ChatScreen — composer', () => {
     const list = screen.getByTestId('chat-feed');
     scrollSpy.mockClear();
 
-    await act(async () => {
-      list.props.onContentSizeChange(320, 900);
-    });
-    expect(scrollSpy).toHaveBeenLastCalledWith(
-      expect.objectContaining({ animated: false }),
-    );
-
-    await act(async () => {
-      list.props.onContentSizeChange(320, 950);
-    });
-    expect(scrollSpy).toHaveBeenLastCalledWith(
-      expect.objectContaining({ animated: true }),
-    );
+    for (const height of [900, 950, 1000]) {
+      await act(async () => {
+        list.props.onContentSizeChange(320, height);
+      });
+      expect(scrollSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ animated: false }),
+      );
+    }
 
     scrollSpy.mockRestore();
   });

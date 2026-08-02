@@ -54,13 +54,17 @@ export default function ChatScreen() {
   // stale height and landed short — most visible on a bubble still growing
   // sentence by sentence. `onContentSizeChange` fires after real layout, so
   // the target height is the true one.
+  //
+  // Always instant, never animated: a streaming reply fires this many times
+  // a second (once per token), and animated scrolls that frequent interrupt
+  // each other before any one of them finishes — the visible position
+  // perpetually lags behind the true bottom. A tool call fires this rarely
+  // enough that each animated scroll had time to complete, which is why
+  // tool messages reached the bottom fully and a streaming reply didn't.
+  // Called this often, instant reads as smooth following anyway.
   const feedListRef = useRef<FlatList<FeedItem>>(null);
-  const hasScrolledOnce = useRef(false);
   const scrollToBottom = () => {
-    // Instant on first paint (nothing to see sliding into place on open);
-    // animated afterward, so a growing reply reads as following along.
-    feedListRef.current?.scrollToEnd({ animated: hasScrolledOnce.current });
-    hasScrolledOnce.current = true;
+    feedListRef.current?.scrollToEnd({ animated: false });
   };
 
   const onSend = () => {
