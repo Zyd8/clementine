@@ -1,3 +1,5 @@
+import * as Sentry from '@sentry/react-native';
+
 import { normalizeEvent, type StreamEvent, type TokenUsage } from '@/types/events';
 
 import { ApiError, makeClient } from './client';
@@ -142,8 +144,13 @@ export async function* streamRunEvents(
         let payload: unknown;
         try {
           payload = JSON.parse(frame.data);
-        } catch {
-          // A malformed frame must not kill a live run.
+        } catch (err) {
+          // Phase 6: a malformed frame is a stream defect worth knowing about
+          // — tag it so the error dashboard distinguishes it from auth/network.
+          Sentry.captureException(
+            err instanceof Error ? err : new Error(String(err)),
+            { tags: { reason: 'parse' } },
+          );
           continue;
         }
         const event = normalizeEvent(payload);

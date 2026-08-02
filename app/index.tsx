@@ -16,6 +16,7 @@ import { useChat } from '@/hooks/useChat';
 import { useTheme } from '@/hooks/useTheme';
 import { useChatStore, type FeedItem } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
+import { useUsageStore } from '@/stores/usage';
 
 /**
  * The chat surface: a terminal scrollback where user turns, agent turns and
@@ -25,7 +26,7 @@ export default function ChatScreen() {
   const theme = useTheme();
   const connection = useConnectionStore((s) => s.connection);
   const feed = useChatStore((s) => s.feed(null));
-  const usage = useChatStore((s) => s.usage(null));
+  const usage = useUsageStore((s) => s.total(null));
   const { send, stop, isStreaming } = useChat();
   const [draft, setDraft] = useState('');
 

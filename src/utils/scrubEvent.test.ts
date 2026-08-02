@@ -84,4 +84,181 @@ describe('scrubEvent', () => {
   it('returns an event (never null) so real crashes are still reported', () => {
     expect(scrubEvent({ message: 'boom' })).not.toBeNull();
   });
+
+  // ---- Phase 6: real-shape Sentry re-verification ----
+
+  describe('real Sentry event shapes', () => {
+    it('redacts apiKey in the request url field (route params leak vector)', () => {
+      const event = {
+        event_id: 'abc123',
+        platform: 'javascript',
+        request: {
+          url: `${URL}/v1/runs?apiKey=${KEY}`,
+          headers: { 'User-Agent': 'test' },
+        },
+      };
+      const scrubbed = scrubEvent(event);
+      const json = JSON.stringify(scrubbed);
+      expect(json).not.toContain(KEY);
+      expect(json).not.toContain('100.106.162.39');
+    });
+
+    it('redacts baseUrl inside exception values and stack traces', () => {
+      const event = {
+        exception: {
+          values: [
+            {
+              type: 'Error',
+              value: `Failed to fetch ${URL}/v1/runs`,
+              stacktrace: {
+                frames: [
+                  { filename: 'runs.ts', function: 'streamRunEvents' },
+                ],
+              },
+            },
+          ],
+        },
+      };
+      const scrubbed = scrubEvent(event);
+      const json = JSON.stringify(scrubbed);
+      expect(json).not.toContain(URL);
+    });
+
+    it('redacts apiKey in a breadcrumb navigation event (React Navigation)', () => {
+      // React Navigation breadcrumbs can carry route params in `data.to`.
+      const breadcrumb = {
+        type: 'navigation',
+        category: 'navigation',
+        data: {
+          from: '/chat',
+          to: `/setup?apiKey=${KEY}&baseUrl=${URL}`,
+        },
+        timestamp: 1234567890,
+      };
+      const scrubbed = scrubEvent(breadcrumb);
+      const json = JSON.stringify(scrubbed);
+      expect(json).not.toContain(KEY);
+      expect(json).not.toContain(URL);
+      // Non-sensitive navigation data should survive.
+      expect(json).toContain('/chat');
+    });
+
+    it('redacts baseUrl inside breadcrumb data.http.url', () => {
+      const breadcrumb = {
+        category: 'http',
+        data: {
+          url: `${URL}/v1/runs`,
+          method: 'POST',
+          status_code: 202,
+        },
+      };
+      const scrubbed = scrubEvent(breadcrumb);
+      const json = JSON.stringify(scrubbed);
+      expect(json).not.toContain(URL);
+      expect(json).toContain('POST');
+      expect(json).toContain('202');
+    });
+
+    it('redacts sensitive data inside component props that React captures', () => {
+      // Sentry can capture React component props in error contexts.
+      const event = {
+        contexts: {
+          react: {
+            componentStack: '...',
+            props: {
+              connection: {
+                baseUrl: URL,
+                apiKey: KEY,
+                name: 'home-hermes',
+              },
+            },
+          },
+        },
+      };
+      const scrubbed = scrubEvent(event);
+      const json = JSON.stringify(scrubbed);
+      expect(json).not.toContain(KEY);
+      expect(json).not.toContain(URL);
+      // Non-sensitive nested values survive.
+      expect(json).toContain('home-hermes');
+    });
+
+    it('redacts URLs in free-text breadcrumb messages', () => {
+      const event = {
+        breadcrumbs: [
+          {
+            message: `Connected to ${URL}`,
+            category: 'console',
+          },
+          {
+            message: 'User sent a message',
+            category: 'console',
+          },
+        ],
+      };
+      const scrubbed = scrubEvent(event) as { breadcrumbs: { message: string }[] };
+      expect(scrubbed.breadcrumbs[0]!.message).not.toContain(URL);
+      expect(scrubbed.breadcrumbs[0]!.message).toContain('[redacted]');
+      expect(scrubbed.breadcrumbs[1]!.message).toBe('User sent a message');
+    });
+
+    it('redacts an apiKey embedded in a full Sentry event payload', () => {
+      // Real Sentry event shape: event_id, timestamp, platform, exception, breadcrumbs, contexts, extra.
+      const event = {
+        event_id: 'evt_001',
+        timestamp: 1690900000,
+        platform: 'javascript',
+        level: 'error',
+        exception: {
+          values: [
+            {
+              type: 'ApiError',
+              value: `Auth failed for ${URL}`,
+              mechanism: { handled: false },
+            },
+          ],
+        },
+        breadcrumbs: [
+          {
+            category: 'http',
+            data: { url: `${URL}/v1/runs`, method: 'POST', Authorization: `Bearer ${KEY}` },
+          },
+          { category: 'navigation', message: 'Screen: chat' },
+        ],
+        contexts: {
+          app: { app_identifier: 'com.clementine' },
+        },
+        extra: {
+          baseUrl: URL,
+          apiKey: KEY,
+          runId: 'run_abc',
+        },
+        tags: { reason: 'auth' },
+      };
+      const scrubbed = scrubEvent(event);
+      const json = JSON.stringify(scrubbed);
+
+      expect(json).not.toContain(KEY);
+      expect(json).not.toContain(URL);
+      expect(json).toContain('[redacted]');
+      // Diagnostic fields survive.
+      expect(json).toContain('run_abc');
+      expect(json).toContain('auth');
+      expect(json).toContain('chat');
+    });
+
+    it('does not redact a hash fragment or data: URL appearing in non-sensitive context', () => {
+      const event = {
+        breadcrumbs: [
+          {
+            category: 'navigation',
+            data: { from: '/chat#messages', to: '/setup' },
+          },
+        ],
+      };
+      const scrubbed = scrubEvent(event);
+      const json = JSON.stringify(scrubbed);
+      expect(json).toContain('/chat#messages');
+    });
+  });
 });

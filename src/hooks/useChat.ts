@@ -1,8 +1,10 @@
+import * as Sentry from '@sentry/react-native';
 import { useCallback, useRef, useState } from 'react';
 
 import { ApiError } from '@/api/client';
 import { createRun, getRun, stopRun, streamRunEvents } from '@/api/runs';
 import { useChatStore, type ProfileId } from '@/stores/chat';
+import { useUsageStore } from '@/stores/usage';
 import { useConnectionStore } from '@/stores/connection';
 
 /**
@@ -50,9 +52,25 @@ export function useChat(profileId: ProfileId = null) {
 
         for await (const event of streamRunEvents(baseUrl, apiKey, runId)) {
           useChatStore.getState().applyEvent(profileId, event);
+          // Phase 6: push usage into the persistent store on every
+          // completed run so the chat header reflects total tokens.
+          if (event.type === 'run.completed' && event.usage) {
+            useUsageStore.getState().addUsage(profileId, event.usage);
+          }
         }
       } catch (error) {
         const message = error instanceof ApiError ? error.message : GENERIC_FAILURE;
+
+        // Phase 6: tag and report SSE stream errors so failures on a phone
+        // you can't SSH into actually reach a dashboard.
+        const reason =
+          error instanceof ApiError
+            ? error.kind
+            : 'stream';
+        Sentry.captureException(
+          error instanceof Error ? error : new Error(String(error)),
+          { tags: { reason } },
+        );
 
         // The stream dropped after the run started — reconcile from the server.
         if (runId) {
@@ -102,6 +120,9 @@ async function reconcile(
     // The store owns the "drop the partial bubble, apply the real output"
     // transition — the hook has no business rewriting feed internals.
     store.reconcileCompletion(profileId, state.output, state.usage);
+    if (state.usage) {
+      useUsageStore.getState().addUsage(profileId, state.usage);
+    }
     return;
   }
 

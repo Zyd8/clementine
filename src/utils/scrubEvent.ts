@@ -21,8 +21,18 @@ const BEARER_IN_TEXT = /\b(bearer\s+)[A-Za-z0-9._~+/-]{8,}=*/gi;
 /** Anything that looks like a host address in free text. */
 const URL_IN_TEXT = /\b(https?:\/\/)[^\s"']+/gi;
 
+/**
+ * Sensitive key=value pairs embedded in query strings, route params, or
+ * any free-text that the key-name matcher can't reach (because the key is
+ * the parent object's property, not the query-param's).
+ */
+const SENSITIVE_IN_QUERYSTRING = /\b(api[-_]?key|base[-_]?url)=[^\s&"']+/gi;
+
 const scrubString = (value: string): string =>
-  value.replace(BEARER_IN_TEXT, `$1${REDACTED}`).replace(URL_IN_TEXT, REDACTED);
+  value
+    .replace(BEARER_IN_TEXT, `$1${REDACTED}`)
+    .replace(URL_IN_TEXT, REDACTED)
+    .replace(SENSITIVE_IN_QUERYSTRING, '$1=[redacted]');
 
 function scrubValue(value: unknown, seen: WeakSet<object>): unknown {
   if (typeof value === 'string') return scrubString(value);

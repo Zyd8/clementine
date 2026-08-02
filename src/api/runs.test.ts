@@ -1,3 +1,5 @@
+import * as Sentry from '@sentry/react-native';
+
 import { createRun, getRun, resolveApproval, stopRun, streamRunEvents } from './runs';
 
 const BASE = 'http://100.106.162.39:8642';
@@ -132,6 +134,10 @@ describe('resolveApproval', () => {
 });
 
 describe('streamRunEvents', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   it('yields normalized events from a real-shaped stream', async () => {
     global.fetch = jest.fn().mockResolvedValue(
       sseResponse([
@@ -170,6 +176,44 @@ describe('streamRunEvents', () => {
     const seen = [];
     for await (const event of streamRunEvents(BASE, KEY, 'run_abc')) seen.push(event);
     expect(seen).toEqual([{ type: 'assistant.delta', text: 'still here' }]);
+  });
+
+  // Phase 6: Sentry SSE-error tagging — parse errors in frames
+  it('tags a malformed SSE frame as a parse error in Sentry', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      sseResponse([
+        'data: {broken\n\n',
+        'data: {"event":"run.completed","output":"x"}\n\n',
+      ]),
+    ) as never;
+
+    const seen = [];
+    for await (const event of streamRunEvents(BASE, KEY, 'run_abc')) seen.push(event);
+
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ tags: { reason: 'parse' } }),
+    );
+  });
+
+  it('does not tag well-formed frames as parse errors', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      sseResponse([
+        'data: {"event":"run.completed","output":"x"}\n\n',
+      ]),
+    ) as never;
+
+    const seen = [];
+    for await (const event of streamRunEvents(BASE, KEY, 'run_abc')) seen.push(event);
+
+    // captureException should not have been called for parse errors
+    const parseCalls = (Sentry.captureException as jest.Mock).mock.calls.filter(
+      (call: unknown[]) => {
+        const hint = call[1] as Record<string, unknown> | undefined;
+        return hint?.tags && (hint.tags as Record<string, string>).reason === 'parse';
+      },
+    );
+    expect(parseCalls).toHaveLength(0);
   });
 
   it('ignores the trailing ": stream closed" comment', async () => {

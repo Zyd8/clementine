@@ -1,8 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
+import * as Sentry from '@sentry/react-native';
 
 import { createRun, getRun, streamRunEvents } from '@/api/runs';
 import { ApiError } from '@/api/client';
 import { useChatStore } from '@/stores/chat';
+import { useUsageStore } from '@/stores/usage';
 import { useConnectionStore } from '@/stores/connection';
 import type { StreamEvent } from '@/types/events';
 
@@ -33,7 +35,7 @@ const streamThatThrows = (events: StreamEvent[], error: Error) =>
 
 const CONNECTION = {
   baseUrl: 'http://100.106.162.39:8642',
-  apiKey: 'a3f1c09b8e7d6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b',
+  apiKey: 'a3f1c...1b',
   connectedAt: 1,
 };
 
@@ -43,15 +45,13 @@ describe('useChat', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     useChatStore.getState().reset(null);
+    useUsageStore.getState().reset(null);
     useConnectionStore.setState({ connection: CONNECTION, hydrated: true });
     mockedCreateRun.mockResolvedValue({ runId: 'run_abc', status: 'started' });
     mockedStream.mockReturnValue(streamOf([]));
   });
 
   it('renders the user message optimistically, before the run is created', async () => {
-    // Asserted from inside the mock: at the moment the network call happens,
-    // the user's message must already be in the feed. Avoids leaving pending
-    // async work behind, which corrupts RNTL's harness for later tests.
     let feedWhenCalled: unknown;
     mockedCreateRun.mockImplementation(async () => {
       feedWhenCalled = feed();
@@ -118,9 +118,6 @@ describe('useChat', () => {
   });
 
   it('tracks the active run while in flight, and clears it after', async () => {
-    // Observed from inside the stream: the generator body runs mid-turn, so
-    // it can sample the store without leaving pending work behind (which
-    // corrupts RNTL's harness for every later test in the file).
     let activeDuringRun: string | null = null;
     mockedStream.mockReturnValue(
       (async function* () {
@@ -161,7 +158,6 @@ describe('useChat', () => {
 
     mockedStream.mockReturnValue(
       (async function* () {
-        // Re-entrant send, fired while the first run is genuinely in flight.
         secondSend = result.current.send('second');
         yield { type: 'run.completed', output: 'x' } as StreamEvent;
       })(),
@@ -206,7 +202,6 @@ describe('useChat', () => {
     });
     expect(result.current.isStreaming).toBe(false);
 
-    // The retry actually goes through — the guard really was released.
     await act(async () => {
       await result.current.send('again');
     });
@@ -223,13 +218,6 @@ describe('useChat', () => {
   });
 
   describe('reconnect after a dropped stream', () => {
-    /**
-     * Hermes sends no Last-Event-ID and offers no event replay, so a client
-     * cannot resume mid-stream. The decided behaviour, pinned here: on a
-     * network drop, poll GET /v1/runs/{id} once and reconcile from the
-     * authoritative final output — accepting a visible gap in the streamed
-     * text rather than duplicating what was already rendered.
-     */
     it('polls the run after the stream drops', async () => {
       mockedStream.mockReturnValue(
         streamThatThrows([{ type: 'assistant.delta', text: 'par' }], new ApiError('network')),
@@ -315,6 +303,160 @@ describe('useChat', () => {
       await waitFor(() =>
         expect(feed()).toContainEqual(expect.objectContaining({ kind: 'error' })),
       );
+    });
+  });
+
+  // ---- Phase 6: usage store wiring ----
+
+  describe('usage persistence', () => {
+    it('pushes usage into the usage store on every completed run', async () => {
+      const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'assistant.delta', text: 'Hello' },
+          { type: 'run.completed', output: 'Hello', usage },
+        ]),
+      );
+
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('hi');
+      });
+
+      await waitFor(() =>
+        expect(useUsageStore.getState().total(null)).toMatchObject({ totalTokens: 12 }),
+      );
+    });
+
+    it('does not push usage when run.completed carries no usage payload', async () => {
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'assistant.delta', text: 'Hi' },
+          { type: 'run.completed', output: 'Hi' },
+        ]),
+      );
+
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('hi');
+      });
+
+      await waitFor(() =>
+        expect(useUsageStore.getState().total(null)).toEqual({
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+        }),
+      );
+    });
+
+    it('pushes usage during reconcile after a dropped stream', async () => {
+      mockedStream.mockReturnValue(
+        streamThatThrows([{ type: 'assistant.delta', text: 'par' }], new ApiError('network')),
+      );
+      mockedGetRun.mockResolvedValue({
+        runId: 'run_abc',
+        status: 'completed',
+        output: 'partial then rest',
+        usage: { inputTokens: 8, outputTokens: 1, totalTokens: 9 },
+      });
+
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('hi');
+      });
+
+      await waitFor(() =>
+        expect(useUsageStore.getState().total(null)).toMatchObject({ totalTokens: 9 }),
+      );
+    });
+
+    it('accumulates usage across multiple turns', async () => {
+      // First turn
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'run.completed', output: 'a', usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 } },
+        ]),
+      );
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('first');
+      });
+      await waitFor(() =>
+        expect(useUsageStore.getState().total(null).totalTokens).toBe(6),
+      );
+
+      // Second turn
+      mockedCreateRun.mockResolvedValue({ runId: 'run_def', status: 'started' });
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'run.completed', output: 'b', usage: { inputTokens: 3, outputTokens: 1, totalTokens: 4 } },
+        ]),
+      );
+      await act(async () => {
+        await result.current.send('second');
+      });
+      await waitFor(() =>
+        expect(useUsageStore.getState().total(null).totalTokens).toBe(10),
+      );
+    });
+  });
+
+  // ---- Phase 6: Sentry SSE-error tagging ----
+
+  describe('Sentry SSE-error tagging', () => {
+    it('reports a stream error to Sentry tagged by reason', async () => {
+      mockedStream.mockReturnValue(
+        streamThatThrows([], new ApiError('network')),
+      );
+      mockedGetRun.mockResolvedValue({ runId: 'run_abc', status: 'completed', output: 'x' });
+
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('hi');
+      });
+
+      await waitFor(() => {
+        expect(Sentry.captureException).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: 'network' }),
+          expect.objectContaining({ tags: { reason: 'network' } }),
+        );
+      });
+    });
+
+    it('reports an auth error to Sentry tagged as auth', async () => {
+      mockedCreateRun.mockRejectedValue(new ApiError('auth', 401));
+
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('hi');
+      });
+
+      await waitFor(() => {
+        expect(Sentry.captureException).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: 'auth' }),
+          expect.objectContaining({ tags: { reason: 'auth' } }),
+        );
+      });
+    });
+
+    it('reports a non-ApiError as untagged generic failure', async () => {
+      mockedStream.mockReturnValue(
+        streamThatThrows([], new Error('something unexpected')),
+      );
+      mockedGetRun.mockRejectedValue(new Error('also unexpected'));
+
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('hi');
+      });
+
+      await waitFor(() => {
+        expect(Sentry.captureException).toHaveBeenCalledWith(
+          expect.any(Error),
+          expect.objectContaining({ tags: { reason: 'stream' } }),
+        );
+      });
     });
   });
 });
