@@ -28,7 +28,16 @@ type BubbleProps = {
 
 const MEDIA_RE = /MEDIA:(\S+)/g;
 
-/** Split a text on MEDIA: tags. `{ text: string }` segments are words; `{ media: string }` are media targets. */
+/** A bare http(s) URL that looks like an image (jpeg/png/gif/webp/avif). */
+const IMAGE_URL_RE =
+  /https?:\/\/\S+\.(?:jpe?g|png|gif|webp|avif)(?:[?#]\S*)?/gi;
+
+/**
+ * Full media split: MEDIA: tags first, then bare image URLs inside any
+ * remaining text. Compose, don't choose — `MEDIA:https://...` must not leak
+ * a raw "MEDIA:" text segment, and `Here: https://...jpg` must still show
+ * the image.
+ */
 export function splitMediaSegments(
   raw: string,
 ): ({ text: string } | { media: string })[] {
@@ -41,6 +50,43 @@ export function splitMediaSegments(
       segments.push({ text: raw.slice(cursor, match.index) });
     }
     segments.push({ media: match[1] ?? '' });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < raw.length) {
+    segments.push({ text: raw.slice(cursor) });
+  }
+  if (segments.length === 0) segments.push({ text: raw });
+
+  // Second pass: bare image URLs inside text segments.
+  const out: ({ text: string } | { media: string })[] = [];
+  for (const segment of segments) {
+    if ('media' in segment) {
+      out.push(segment);
+      continue;
+    }
+    out.push(...splitBareImageUrls(segment.text));
+  }
+  return out;
+}
+
+/**
+ * Split on bare image URLs too — the agent sometimes replies with a plain
+ * `https://...jpg` instead of a MEDIA: tag (or the standing instruction is
+ * honored and it returns the URL directly). `{ text }` is words,
+ * `{ media }` is a media target.
+ */
+export function splitBareImageUrls(
+  raw: string,
+): ({ text: string } | { media: string })[] {
+  const segments: ({ text: string } | { media: string })[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  const re = new RegExp(IMAGE_URL_RE.source, 'gi');
+  while ((match = re.exec(raw)) !== null) {
+    if (match.index > cursor) {
+      segments.push({ text: raw.slice(cursor, match.index) });
+    }
+    segments.push({ media: match[0] });
     cursor = match.index + match[0].length;
   }
   if (cursor < raw.length) {
@@ -83,7 +129,7 @@ export function Bubble({ role, text, streaming, avatar, testID }: BubbleProps) {
         paddingVertical: theme.spacing.sm,
       }}
     >
-      {role === 'assistant' && /MEDIA:\S+/.test(text) && !streaming ? (
+      {role === 'assistant' && /MEDIA:\S+|https?:\/\/\S+\.(?:jpe?g|png|gif|webp|avif)/i.test(text) && !streaming ? (
         <View style={{ gap: theme.spacing.sm }}>
           {splitMediaSegments(text).map((segment, i) => {
             if ('media' in segment && typeof segment.media === 'string') {

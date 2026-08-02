@@ -125,4 +125,14 @@ describe('Bubble', () => {
     await render(<Bubble role="assistant" text="no media here" />);
     expect(screen.getByText('no media here')).toBeTruthy();
   });
+
+  it('renders a bare image URL (no MEDIA: tag) as an Image', async () => {
+    await render(
+      <Bubble role="assistant" text={'Here is the image: https://picsum.photos/800/500.jpg'} />,
+    );
+    const img = screen.getByLabelText('Image: 500.jpg');
+    expect(img).toBeTruthy();
+    expect(img.props.source).toEqual({ uri: 'https://picsum.photos/800/500.jpg' });
+    expect(screen.getByText(/Here is the image:/)).toBeTruthy();
+  });
 });

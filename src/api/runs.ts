@@ -25,6 +25,18 @@ export type RunState = {
   usage?: TokenUsage;
 };
 
+/**
+ * Standing instruction sent with every run: the agent is talking to a phone.
+ *
+ * The phone can only fetch http(s) URLs — it cannot read files from the
+ * Hermes host's disk. Without this, an image request makes the agent
+ * download to a local path and reply `MEDIA:/home/...`, which the phone
+ * cannot display (Bubble shows a "not reachable" note instead). This keeps
+ * the agent returning URLs it can actually render.
+ */
+export const PHONE_INSTRUCTIONS =
+  'You are talking to a phone app (Clementine). To show an image, reply with the image URL inline (https://...) — do NOT download the image to disk, do NOT emit MEDIA:<local-path> tags; the phone cannot fetch files from the host.';
+
 export async function createRun(
   baseUrl: string,
   credential: string,
@@ -33,7 +45,11 @@ export async function createRun(
   const body = await makeClient(baseUrl, credential).post<{
     run_id: string;
     status?: RunStatus;
-  }>('/v1/runs', { input, ...(sessionId ? { session_id: sessionId } : {}) });
+  }>('/v1/runs', {
+    input,
+    instructions: PHONE_INSTRUCTIONS,
+    ...(sessionId ? { session_id: sessionId } : {}),
+  });
 
   return { runId: body.run_id, status: body.status ?? 'started' };
 }
