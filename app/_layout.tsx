@@ -42,6 +42,7 @@ export default function RootLayout() {
       }}
     >
       <Stack.Screen name="index" options={{ title: 'CLEMENTINE' }} />
+      <Stack.Screen name="sessions" options={{ title: 'SESSIONS' }} />
       <Stack.Screen name="setup" options={{ title: 'CONNECT HERMES' }} />
     </Stack>
   );

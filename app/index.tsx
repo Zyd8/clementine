@@ -92,6 +92,17 @@ export default function ChatScreen() {
         >
           {connection?.name ?? connection?.baseUrl ?? 'NOT CONNECTED'}
         </Text>
+        <Pressable onPress={() => router.push('/sessions')}>
+          <Text
+            style={{
+              color: theme.colors.inkMuted,
+              fontFamily: theme.typography.mono.fontFamily,
+              fontSize: theme.typography.mono.fontSize,
+            }}
+          >
+            SESSIONS
+          </Text>
+        </Pressable>
         <Pressable onPress={() => router.push('/setup')}>
           <Text
             style={{
