@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
   Pressable,
@@ -8,6 +9,7 @@ import {
 } from 'react-native';
 
 import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
+import { Field } from '@/components/ui/Field';
 import { useTheme } from '@/hooks/useTheme';
 import { useBudgetStore } from '@/stores/budget';
 import { useConnectionStore } from '@/stores/connection';
@@ -23,6 +25,9 @@ const ASR_OPTIONS: readonly { value: AsrProviderConfig['provider']; label: strin
   { value: 'openai', label: 'OpenAI Whisper' },
 ];
 
+/** Neither the phone's own engine nor Edge's free endpoint takes a key. */
+const KEYLESS_TTS: readonly TtsProviderConfig['provider'][] = ['device', 'edge'];
+
 const TTS_OPTIONS: readonly { value: TtsProviderConfig['provider']; label: string }[] = [
   { value: 'device', label: 'On-device voice (free, offline)' },
   { value: 'edge', label: 'Edge TTS (free)' },
@@ -36,9 +41,12 @@ const TTS_OPTIONS: readonly { value: TtsProviderConfig['provider']; label: strin
  *
  * The theme control moved here from the chat header — the design gives it a
  * row of its own showing all three states, rather than a one-label toggle
- * that took two taps to discover. Provider API keys still live on
- * `/voice-profile`; this screen only picks which provider is active, which is
- * what the design draws.
+ * that took two taps to discover.
+ *
+ * Key entry sits directly under the picker it belongs to. It used to live on
+ * `/voice-profile`, which stopped being reachable when the tab bar replaced
+ * the header nav — so picking a provider here left no way to give it a key.
+ * That screen keeps the timing controls and is linked at the bottom.
  */
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -56,6 +64,21 @@ export default function SettingsScreen() {
   const dailyLimit = useBudgetStore((s) => s.dailyLimit);
   const setLimit = useBudgetStore((s) => s.setLimit);
   const [budgetDraft, setBudgetDraft] = useState(String(dailyLimit));
+
+  // Keys are held locally while typing and written straight through, so a
+  // half-typed key is never what the provider is called with.
+  const [asrKey, setAsrKey] = useState(voiceProfile.asr.apiKey ?? '');
+  const [ttsKey, setTtsKey] = useState(voiceProfile.tts.apiKey ?? '');
+
+  const onAsrKeyChange = (apiKey: string) => {
+    setAsrKey(apiKey);
+    void updateAsrConfig({ apiKey });
+  };
+
+  const onTtsKeyChange = (apiKey: string) => {
+    setTtsKey(apiKey);
+    void updateTtsConfig({ apiKey });
+  };
 
   const onBudgetChange = (text: string) => {
     const digits = text.replace(/[^0-9]/g, '');
@@ -199,6 +222,14 @@ export default function SettingsScreen() {
               ),
             )}
           </View>
+          {/* Every ASR provider is a cloud service, so this is never optional. */}
+          <Field
+            label="ASR API Key"
+            value={asrKey}
+            onChangeText={onAsrKeyChange}
+            placeholder="paste the provider's key"
+            secret
+          />
         </View>
 
         <View style={{ gap: theme.spacing.sm }}>
@@ -210,6 +241,15 @@ export default function SettingsScreen() {
               ),
             )}
           </View>
+          {KEYLESS_TTS.includes(voiceProfile.tts.provider) ? null : (
+            <Field
+              label="TTS API Key"
+              value={ttsKey}
+              onChangeText={onTtsKeyChange}
+              placeholder="paste the provider's key"
+              secret
+            />
+          )}
         </View>
 
         <View style={{ gap: theme.spacing.sm }}>
@@ -255,6 +295,32 @@ export default function SettingsScreen() {
             non-blocking warning only — the app can&apos;t cap what the server does
           </Text>
         </View>
+
+        {/* Silence timeouts, interrupt behaviour and voice id live on their own
+            screen. It lost its last entry point when the tab bar replaced the
+            header nav; this is it. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Advanced voice settings"
+          onPress={() => router.push('/voice-profile')}
+          style={{
+            borderColor: theme.colors.steel,
+            borderRadius: theme.radius.sm,
+            borderWidth: 1,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+          }}
+        >
+          <Text
+            style={{
+              color: theme.colors.inkMuted,
+              fontFamily: theme.fonts.regular,
+              fontSize: theme.type(12.5),
+            }}
+          >
+            ADVANCED VOICE — timings, interrupt, voice id
+          </Text>
+        </Pressable>
       </ScrollView>
     </View>
   );

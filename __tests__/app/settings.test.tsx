@@ -94,6 +94,67 @@ describe('SettingsScreen', () => {
     await waitFor(() => expect(useBudgetStore.getState().dailyLimit).toBe(20_000));
   });
 
+  /**
+   * The bug this covers: the provider pickers lived here while every key
+   * field lived on `/voice-profile`, which nothing routed to any more. You
+   * could pick Groq and have no reachable way to give it a key.
+   */
+  describe('provider keys', () => {
+    it('asks for the ASR key beside the ASR picker', async () => {
+      await render(<SettingsScreen />);
+      expect(screen.getByLabelText('ASR API Key')).toBeTruthy();
+    });
+
+    it('stores the ASR key as it is typed', async () => {
+      await render(<SettingsScreen />);
+      fireEvent.changeText(screen.getByLabelText('ASR API Key'), 'gsk_typed');
+      await waitFor(() =>
+        expect(useVoiceProfileStore.getState().profile.asr.apiKey).toBe('gsk_typed'),
+      );
+    });
+
+    it('asks for a TTS key once a keyed voice is picked', async () => {
+      useVoiceProfileStore.setState({
+        profile: { ...VOICE_PROFILE_DEFAULTS, tts: { provider: 'elevenlabs' } },
+        hydrated: true,
+      });
+      await render(<SettingsScreen />);
+      expect(screen.getByLabelText('TTS API Key')).toBeTruthy();
+    });
+
+    /** The phone's own voice and Edge's free endpoint take no key. */
+    it.each(['device', 'edge'] as const)(
+      'asks for no TTS key when %s is picked',
+      async (provider) => {
+        useVoiceProfileStore.setState({
+          profile: { ...VOICE_PROFILE_DEFAULTS, tts: { provider } },
+          hydrated: true,
+        });
+        await render(<SettingsScreen />);
+        expect(screen.queryByLabelText('TTS API Key')).toBeNull();
+      },
+    );
+
+    it('masks the key and blocks copying it out', async () => {
+      await render(<SettingsScreen />);
+      const input = screen.getByLabelText('ASR API Key');
+      expect(input.props.secureTextEntry).toBe(true);
+      expect(input.props.contextMenuHidden).toBe(true);
+    });
+
+    /** Timing controls still live on their own screen — it has to be reachable. */
+    it('routes to the advanced voice screen', async () => {
+      const { router } = jest.requireMock('expo-router') as {
+        router: { push: jest.Mock };
+      };
+      router.push.mockClear();
+
+      await render(<SettingsScreen />);
+      fireEvent.press(screen.getByLabelText('Advanced voice settings'));
+      expect(router.push).toHaveBeenCalledWith('/voice-profile');
+    });
+  });
+
   it('says the budget cannot actually stop the server', async () => {
     await render(<SettingsScreen />);
     expect(screen.getByText(/non-blocking warning only/)).toBeTruthy();
