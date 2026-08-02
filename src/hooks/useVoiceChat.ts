@@ -12,6 +12,7 @@ import { createAsrProvider, type AsrProvider } from '@/voice/asr';
 import { createRecorder, RECORDING_FORMAT, type Recorder } from '@/voice/recorder';
 import { executeInterrupt } from '@/voice/interrupt';
 import { createSentenceBuffer, type SentenceBuffer } from '@/voice/sentenceBuffer';
+import { describeTool, pickThinkingFiller, pickToolFiller } from '@/voice/toolNarration';
 import { createTtsProvider, type TtsProvider } from '@/voice/tts';
 import { createVadClient, type VadClient, type VadCallbacks } from '@/voice/vad';
 
@@ -184,7 +185,22 @@ export function useVoiceChat(profileId: ProfileId = null) {
         ttsRef.current = tts;
         sentenceBufRef.current.reset();
 
+        // Fills the silence between the mic closing and the reply actually
+        // starting — otherwise the wait for the model's first token (often
+        // the single longest gap in the whole turn) is dead air. Once per
+        // turn, varied wording — see toolNarration.ts.
+        void tts.speak(pickThinkingFiller()).catch((err) => {
+          Sentry.captureException(
+            err instanceof Error ? err : new Error(String(err)),
+            { tags: { reason: 'voice' } },
+          );
+        });
+
         let firstSentence = true;
+        // A tool call gets spoken about once per turn, not once per call —
+        // several tool calls in one reply must not repeat "One moment"
+        // (or anything else) three times in a row.
+        let toolNarrated = false;
 
         // Stream SSE events
         for await (const event of streamRunEvents(baseUrl, apiKey, runId)) {
@@ -208,20 +224,26 @@ export function useVoiceChat(profileId: ProfileId = null) {
           }
 
           if (event.type === 'tool.started') {
-            // Otherwise a tool call is silence: the reply hasn't started
-            // and there is no visible feed on this screen, so a slow tool
-            // reads as the app having hung. Speaks over the same TTS
-            // instance the reply will use, so it queues before the reply
-            // rather than talking over it — deliberately NOT transitioning
-            // to PLAYING, so this can't be mistaken for the reply finishing
-            // if the tool is still running when it stops speaking.
-            setStatus(`Using ${event.tool}…`);
-            void tts.speak(`One moment, using ${event.tool}.`).catch((err) => {
-              Sentry.captureException(
-                err instanceof Error ? err : new Error(String(err)),
-                { tags: { reason: 'voice' } },
-              );
-            });
+            // The status text is a description, not the raw tool name — a
+            // user hears/reads "web_search" as jargon, not information.
+            // Updated on every call (it's just text, not speech, so
+            // repeating it isn't annoying the way saying it aloud would be).
+            setStatus(`${describeTool(event.tool)}…`);
+
+            // But only SPOKEN once per turn — several tool calls in one
+            // reply must not repeat themselves. Deliberately NOT
+            // transitioning to PLAYING, so this can't be mistaken for the
+            // reply finishing if the tool is still running when it stops
+            // speaking.
+            if (!toolNarrated) {
+              toolNarrated = true;
+              void tts.speak(pickToolFiller(event.tool)).catch((err) => {
+                Sentry.captureException(
+                  err instanceof Error ? err : new Error(String(err)),
+                  { tags: { reason: 'voice' } },
+                );
+              });
+            }
           }
 
           if (event.type === 'run.completed' && event.usage) {

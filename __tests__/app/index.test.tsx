@@ -3,7 +3,6 @@ import { act, render, screen, fireEvent } from '@testing-library/react-native';
 import { FlatList } from 'react-native';
 
 import { darkTheme } from '@/constants/theme';
-import { useChatStore } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -176,23 +175,56 @@ describe('ChatScreen — composer', () => {
    * this, reading it means scrolling down by hand, repeatedly, while it is
    * still arriving.
    */
-  it('scrolls to the end whenever the feed updates', async () => {
+  /**
+   * `onContentSizeChange`, not a `feed`-keyed effect: an effect fires the
+   * instant state updates, before FlatList has measured the newly grown
+   * content, so `scrollToEnd` computed against a stale height and landed
+   * short — most visible on a bubble still growing sentence by sentence.
+   * `onContentSizeChange` fires after real layout, so it's simulated
+   * directly here rather than via a state change RNTL's renderer never
+   * actually lays out.
+   */
+  it('scrolls to the end when the feed content grows', async () => {
     const scrollSpy = jest
       .spyOn(FlatList.prototype, 'scrollToEnd')
       .mockImplementation(() => undefined);
 
     await render(<ChatScreen />);
+    const list = screen.getByTestId('chat-feed');
     scrollSpy.mockClear(); // ignore whatever the initial mount triggered
 
-    // A stable reference, like the real store's — a selector returning a
-    // fresh array on every read (rather than only on an actual update) never
-    // settles, since every render looks like a change.
-    const nextFeed = [{ kind: 'user' as const, id: '1', text: 'hi' }];
     await act(async () => {
-      useChatStore.setState({ feed: () => nextFeed } as never);
+      list.props.onContentSizeChange(320, 900);
     });
 
-    expect(scrollSpy).toHaveBeenCalledWith(expect.objectContaining({ animated: true }));
+    expect(scrollSpy).toHaveBeenCalled();
+
+    scrollSpy.mockRestore();
+  });
+
+  /** Landing at the bottom on open must not be seen sliding into place. */
+  it('jumps to the bottom instantly the first time, not animated', async () => {
+    const scrollSpy = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => undefined);
+
+    await render(<ChatScreen />);
+    const list = screen.getByTestId('chat-feed');
+    scrollSpy.mockClear();
+
+    await act(async () => {
+      list.props.onContentSizeChange(320, 900);
+    });
+    expect(scrollSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ animated: false }),
+    );
+
+    await act(async () => {
+      list.props.onContentSizeChange(320, 950);
+    });
+    expect(scrollSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ animated: true }),
+    );
 
     scrollSpy.mockRestore();
   });

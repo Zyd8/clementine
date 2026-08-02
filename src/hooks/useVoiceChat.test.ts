@@ -904,10 +904,62 @@ describe('useVoiceChat', () => {
         await result.current.simulateEndOfSpeech();
       });
 
+      // Never the raw tool name — a friendly description of what it does.
       const speak = ttsProvider.current?.speak as jest.Mock;
-      expect(speak.mock.calls.some(([text]) => String(text).includes('web_search'))).toBe(
-        true,
+      const spoken = speak.mock.calls.map(([text]) => String(text));
+      expect(spoken.some((text) => text.includes('web_search'))).toBe(false);
+      expect(spoken.some((text) => text.includes('searching for that'))).toBe(true);
+    });
+
+    /** Several tool calls in one reply must not repeat the narration. */
+    it('narrates a tool call once per turn, not once per call', async () => {
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'tool.started', tool: 'web_search', args: '{}' } as StreamEvent,
+          { type: 'tool.completed', tool: 'web_search', ok: true } as StreamEvent,
+          { type: 'tool.started', tool: 'read_file', args: '{}' } as StreamEvent,
+          { type: 'tool.completed', tool: 'read_file', ok: true } as StreamEvent,
+          { type: 'assistant.delta', text: 'Found it.' } as StreamEvent,
+          { type: 'run.completed', output: 'Found it.' } as StreamEvent,
+        ]),
       );
+
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      const speak = ttsProvider.current?.speak as jest.Mock;
+      const spoken = speak.mock.calls.map(([text]) => String(text));
+      // Both tool descriptions could plausibly appear once from narration —
+      // what must never happen is either being said more than once.
+      const searching = spoken.filter((t) => t.includes('searching for that'));
+      const lookingUp = spoken.filter((t) => t.includes('looking that up'));
+      expect(searching.length + lookingUp.length).toBeLessThanOrEqual(1);
+    });
+
+    /** Fills the wait for the model's first token instead of dead air. */
+    it('speaks a filler as soon as the run starts, before anything else arrives', async () => {
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      const speak = ttsProvider.current?.speak as jest.Mock;
+      expect(speak).toHaveBeenCalled();
+      expect(String(speak.mock.calls[0]![0]).length).toBeGreaterThan(0);
     });
 
     /**

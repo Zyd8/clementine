@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 
 import { ProfilePicker } from '@/components/features/ProfilePicker';
@@ -44,14 +44,24 @@ export default function ChatScreen() {
   const composerRef = useRef<View>(null);
   const keyboardOverlap = useKeyboardOverlap(composerRef);
 
-  // Follows the reply as it streams in. `feed` gets a new array reference on
-  // every delta (the store rebuilds it immutably), so this fires per-token,
-  // not just per-message — without it, a long reply grows past the bottom
-  // of the screen and the user has to keep scrolling down by hand to read it.
+  // Follows the reply as it streams in, and lands at the bottom on open —
+  // e.g. after `useChat` resumes the last session's history, so re-entering
+  // the tab shows the end of the conversation, not the top of it.
+  //
+  // Driven by `onContentSizeChange`, not a `feed`-keyed effect: an effect
+  // fires the instant the state updates, before FlatList has actually
+  // measured the newly grown content, so `scrollToEnd` computed against a
+  // stale height and landed short — most visible on a bubble still growing
+  // sentence by sentence. `onContentSizeChange` fires after real layout, so
+  // the target height is the true one.
   const feedListRef = useRef<FlatList<FeedItem>>(null);
-  useEffect(() => {
-    feedListRef.current?.scrollToEnd({ animated: true });
-  }, [feed]);
+  const hasScrolledOnce = useRef(false);
+  const scrollToBottom = () => {
+    // Instant on first paint (nothing to see sliding into place on open);
+    // animated afterward, so a growing reply reads as following along.
+    feedListRef.current?.scrollToEnd({ animated: hasScrolledOnce.current });
+    hasScrolledOnce.current = true;
+  };
 
   const onSend = () => {
     const text = draft;
@@ -237,6 +247,8 @@ export default function ChatScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: theme.spacing.sm, padding: theme.spacing.md }}
         keyboardShouldPersistTaps="handled"
+        onContentSizeChange={scrollToBottom}
+        onLayout={scrollToBottom}
         ListHeaderComponent={
           <View style={{ gap: theme.spacing.sm, marginBottom: theme.spacing.sm }}>
             <View
