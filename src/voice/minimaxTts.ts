@@ -192,6 +192,12 @@ export function createMiniMaxTtsProvider(
       playback.stop();
     },
 
-    isPlaying: (): boolean => playback.isPlaying(),
+    // `playback.isPlaying()` alone is false during the synthesis round trip
+    // (queued but no audio yet) — the exact gap that let the caller believe
+    // a reply was finished and reopen the mic while a sentence was still on
+    // its way out, right before it started playing. `queued` covers that
+    // gap: incremented the instant speak() accepts a sentence, decremented
+    // only once it has actually played (or failed).
+    isPlaying: (): boolean => queued > 0,
   };
 }

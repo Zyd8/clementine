@@ -139,6 +139,38 @@ describe('edgeTts', () => {
       expect(provider.isPlaying()).toBe(false);
     });
 
+    /**
+     * The regression this guards: `isPlaying()` used to defer entirely to
+     * the audio player, which stays false for the whole WSS round trip —
+     * connect, send SSML, wait for frames. A caller polling `isPlaying()`
+     * right after `speak()` (to decide whether a reply just finished) saw
+     * false during that gap and could act as if nothing was queued, even
+     * though a sentence was on its way and about to play.
+     */
+    it('reports isPlaying true while a sentence is queued but not yet audible', async () => {
+      const cbs = makeCbs();
+      const socket = makeSocket();
+      const provider = createEdgeTtsProvider(cbs, 'en-US-AriaNeural', {
+        wsFactory: () => socket,
+      });
+
+      const playPromise = provider.speak('Hello there.');
+      await flush();
+
+      // Still mid round-trip — no frames received yet — but the sentence
+      // is genuinely in flight.
+      expect(provider.isPlaying()).toBe(true);
+
+      socket.onopen?.();
+      socket.onmessage?.({ data: 'X-RequestId:x\r\nPath:turn.start\r\n\r\n' });
+      socket.onmessage?.({ data: audioFrame(new Uint8Array([1, 2, 3])) });
+      socket.onmessage?.({ data: 'X-RequestId:x\r\nPath:turn.end\r\n\r\n' });
+      socket.onclose?.();
+      await playPromise;
+
+      expect(provider.isPlaying()).toBe(false);
+    });
+
     it('rejects and reports onError when the turn ends with no audio', async () => {
       const cbs = makeCbs();
       const socket = makeSocket();

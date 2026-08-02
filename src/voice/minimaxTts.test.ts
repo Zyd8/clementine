@@ -100,6 +100,37 @@ describe('createMiniMaxTtsProvider', () => {
     expect(provider.isPlaying()).toBe(false);
   });
 
+  /**
+   * The regression this guards: `isPlaying()` used to defer entirely to the
+   * audio player, which stays false for the whole synthesis round trip — the
+   * fetch to MiniMax and its response. A caller polling `isPlaying()` right
+   * after `speak()` (to decide whether a reply just finished) saw false
+   * during that gap and could act as if nothing was queued, even though a
+   * sentence was in flight and about to play.
+   */
+  it('reports isPlaying true while a sentence is queued but not yet audible', async () => {
+    let resolveFetch: (value: unknown) => void = () => undefined;
+    global.fetch = jest.fn().mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    ) as unknown as typeof fetch;
+    const cbs = makeCbs();
+    const provider = createMiniMaxTtsProvider('mm_key', 'Wise_Woman', cbs);
+
+    const speakPromise = provider.speak('Hello there.');
+    // Still mid round-trip — the fetch hasn't resolved, nothing handed to
+    // the player yet — but the sentence is genuinely in flight.
+    await Promise.resolve();
+    expect(createAudioPlayer).not.toHaveBeenCalled();
+    expect(provider.isPlaying()).toBe(true);
+
+    resolveFetch(okResponse());
+    await speakPromise;
+
+    expect(provider.isPlaying()).toBe(false);
+  });
+
   it('falls back to a default voice when none is configured', async () => {
     const fetchMock = respond(okResponse());
     const provider = createMiniMaxTtsProvider('mm_key', '', makeCbs());
