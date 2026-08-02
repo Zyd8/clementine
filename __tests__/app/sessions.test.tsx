@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react-native';
 
-import SessionsScreen from '../../app/sessions';
+import SessionsScreen from '../../app/(tabs)/sessions';
 
 jest.mock('react-native/Libraries/Utilities/useColorScheme', () => ({
   default: jest.fn(() => 'dark'),

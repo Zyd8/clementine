@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
 import {
   FlatList,
@@ -18,15 +17,7 @@ import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useTheme } from '@/hooks/useTheme';
 import { useChatStore, type FeedItem } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
-import { useSettingsStore, type ThemePreference } from '@/stores/settings';
 import { useUsageStore } from '@/stores/usage';
-
-const THEME_CYCLE: readonly ThemePreference[] = ['system', 'light', 'dark'];
-
-const nextTheme = (current: ThemePreference): ThemePreference => {
-  const idx = THEME_CYCLE.indexOf(current);
-  return THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]!;
-};
 
 /**
  * The chat surface: a terminal scrollback where user turns, agent turns and
@@ -40,9 +31,6 @@ export default function ChatScreen() {
   const { send, stop, isStreaming } = useChat();
   const { voiceState, tapMic } = useVoiceChat();
   const [draft, setDraft] = useState('');
-
-  const themeMode = useSettingsStore((s) => s.theme);
-  const setTheme = useSettingsStore((s) => s.setTheme);
 
   const onSend = () => {
     const text = draft;
@@ -75,15 +63,15 @@ export default function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
     >
-      {/* Two rows: identity on top, navigation below. One row could not hold
-          both — the endpoint name lost the width fight with four nav labels
-          and rendered clipped. */}
+      {/* Identity only. Navigation moved to the tab bar and the theme control
+          to the settings tab, which is what left room for the endpoint name. */}
       <View
         style={{
           borderBottomColor: theme.colors.steel,
           borderBottomWidth: 1,
           gap: theme.spacing.sm,
-          padding: theme.spacing.md,
+          paddingHorizontal: theme.spacing.md,
+          paddingVertical: 14,
         }}
       >
         <View
@@ -138,42 +126,6 @@ export default function ChatScreen() {
           ) : null}
         </View>
 
-        <View style={{ flexDirection: 'row', gap: theme.spacing.md }}>
-          {(
-            [
-              ['SESSIONS', '/sessions'],
-              ['VOICE', '/voice-profile'],
-              ['SETUP', '/setup'],
-            ] as const
-          ).map(([label, href]) => (
-            <Pressable key={label} onPress={() => router.push(href)}>
-              <Text
-                style={{
-                  color: theme.colors.inkMuted,
-                  fontFamily: theme.typography.mono.fontFamily,
-                  fontSize: theme.typography.mono.fontSize,
-                }}
-              >
-                {label}
-              </Text>
-            </Pressable>
-          ))}
-          <View style={{ flex: 1 }} />
-          <Pressable
-            accessibilityLabel="Toggle theme"
-            onPress={() => void setTheme(nextTheme(themeMode))}
-          >
-            <Text
-              style={{
-                color: theme.colors.inkMuted,
-                fontFamily: theme.typography.mono.fontFamily,
-                fontSize: theme.typography.mono.fontSize,
-              }}
-            >
-              {themeMode.toUpperCase()}
-            </Text>
-          </Pressable>
-        </View>
       </View>
 
       <FlatList
@@ -197,7 +149,7 @@ export default function ChatScreen() {
           aria-label="Message"
           value={draft}
           onChangeText={setDraft}
-          placeholder="Ask the agent…"
+          placeholder="message the agent…"
           placeholderTextColor={theme.colors.inkMuted}
           onSubmitEditing={onSend}
           style={{
@@ -219,8 +171,9 @@ export default function ChatScreen() {
             alignItems: 'center',
             backgroundColor: isStreaming ? theme.colors.steel : theme.colors.gold,
             borderRadius: theme.radius.sm,
+            height: 38,
             justifyContent: 'center',
-            paddingHorizontal: theme.spacing.md,
+            width: 38,
           }}
         >
           <Text
@@ -230,7 +183,7 @@ export default function ChatScreen() {
               fontWeight: '700',
             }}
           >
-            {isStreaming ? '■' : '↑'}
+            {isStreaming ? '■' : '➜'}
           </Text>
         </Pressable>
         {/* Tap-to-talk. The hook owns the ASR/TTS lifecycle; this is the only

@@ -1,11 +1,11 @@
 import React from 'react';
-import { render, screen, act, fireEvent } from '@testing-library/react-native';
+import { render, screen, fireEvent } from '@testing-library/react-native';
 
 import { darkTheme } from '@/constants/theme';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
 
-import ChatScreen from '../../app/index';
+import ChatScreen from '../../app/(tabs)/index';
 
 jest.mock('react-native/Libraries/Utilities/useColorScheme', () => ({
   default: jest.fn(() => 'dark'),
@@ -52,50 +52,6 @@ jest.mock('@/stores/usage', () => {
   };
 });
 
-describe('ChatScreen — theme toggle', () => {
-  beforeEach(() => {
-    useSettingsStore.setState({ theme: 'system', hydrated: true });
-    useConnectionStore.setState({
-      connection: {
-        name: 'Test Hermes',
-        baseUrl: 'http://100.106.162.39:8642',
-        apiKey: 'test-key',
-        connectedAt: 1,
-      },
-      hydrated: true,
-    });
-  });
-
-  it('renders a theme toggle that cycles system → light → dark', async () => {
-    const { rerender } = await render(<ChatScreen />);
-
-    // Initial label: SYSTEM
-    expect(screen.getByLabelText('Toggle theme')).toBeTruthy();
-    expect(screen.getByText('SYSTEM')).toBeTruthy();
-
-    // Switch to light
-    await act(async () => {
-      await useSettingsStore.getState().setTheme('light');
-    });
-    await rerender(<ChatScreen />);
-    expect(screen.getByText('LIGHT')).toBeTruthy();
-
-    // Switch to dark
-    await act(async () => {
-      await useSettingsStore.getState().setTheme('dark');
-    });
-    await rerender(<ChatScreen />);
-    expect(screen.getByText('DARK')).toBeTruthy();
-
-    // Back to system
-    await act(async () => {
-      await useSettingsStore.getState().setTheme('system');
-    });
-    await rerender(<ChatScreen />);
-    expect(screen.getByText('SYSTEM')).toBeTruthy();
-  });
-});
-
 describe('ChatScreen — header', () => {
   const flatten = (style: unknown): Record<string, unknown> =>
     Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
@@ -131,9 +87,10 @@ describe('ChatScreen — header', () => {
 
   /**
    * Phase 10's audit flagged this: the label looked like a readout but
-   * navigated to setup. The readout is now inert and SETUP is its own link.
+   * navigated to setup. It is now purely a readout — reconfiguring lives on
+   * the settings tab.
    */
-  it('keeps the token readout inert and gives SETUP its own control', async () => {
+  it('keeps the token readout inert', async () => {
     const { router } = jest.requireMock('expo-router') as {
       router: { push: jest.Mock };
     };
@@ -142,9 +99,14 @@ describe('ChatScreen — header', () => {
     await render(<ChatScreen />);
     fireEvent.press(screen.getByTestId('usage-badge'));
     expect(router.push).not.toHaveBeenCalled();
+  });
 
-    fireEvent.press(screen.getByText('SETUP'));
-    expect(router.push).toHaveBeenCalledWith('/setup');
+  /** The tab bar owns navigation now — the header must not duplicate it. */
+  it('no longer carries its own nav row', async () => {
+    await render(<ChatScreen />);
+    for (const label of ['SESSIONS', 'VOICE', 'SETUP']) {
+      expect(screen.queryByText(label)).toBeNull();
+    }
   });
 });
 
