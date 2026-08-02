@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
   Pressable,
@@ -9,28 +8,38 @@ import {
 } from 'react-native';
 
 import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
-import { Field } from '@/components/ui/Field';
+import { ProviderPicker } from '@/components/features/ProviderPicker';
+import { Stepper } from '@/components/ui/Stepper';
 import { useTheme } from '@/hooks/useTheme';
 import { useBudgetStore } from '@/stores/budget';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore, type ThemePreference } from '@/stores/settings';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
-import type { AsrProviderConfig, TtsProviderConfig } from '@/types/voice';
+import type { ProviderOption } from '@/components/features/ProviderPicker';
+import type {
+  AsrProviderConfig,
+  InterruptBehavior,
+  TtsProviderConfig,
+} from '@/types/voice';
 
 const THEME_OPTIONS: readonly ThemePreference[] = ['system', 'light', 'dark'];
 
-const ASR_OPTIONS: readonly { value: AsrProviderConfig['provider']; label: string }[] = [
+const ASR_OPTIONS: readonly ProviderOption<AsrProviderConfig['provider']>[] = [
   { value: 'groq', label: 'Groq Whisper (free tier)' },
   { value: 'deepgram', label: 'Deepgram streaming' },
   { value: 'openai', label: 'OpenAI Whisper' },
 ];
 
 /** Neither the phone's own engine nor Edge's free endpoint takes a key. */
-const KEYLESS_TTS: readonly TtsProviderConfig['provider'][] = ['device', 'edge'];
+/** What happens to a spoken reply when the user talks over it. */
+const INTERRUPT_OPTIONS: readonly { value: InterruptBehavior; label: string }[] = [
+  { value: 'stop_speech_and_run', label: 'Stop speaking and cancel the run' },
+  { value: 'stop_speech_only', label: 'Stop speaking, let the run finish' },
+];
 
-const TTS_OPTIONS: readonly { value: TtsProviderConfig['provider']; label: string }[] = [
-  { value: 'device', label: 'On-device voice (free, offline)' },
-  { value: 'edge', label: 'Edge TTS (free)' },
+const TTS_OPTIONS: readonly ProviderOption<TtsProviderConfig['provider']>[] = [
+  { value: 'device', label: 'On-device voice (free, offline)', keyless: true },
+  { value: 'edge', label: 'Edge TTS (free)', keyless: true },
   { value: 'elevenlabs', label: 'ElevenLabs' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'minimax', label: 'MiniMax' },
@@ -43,10 +52,12 @@ const TTS_OPTIONS: readonly { value: TtsProviderConfig['provider']; label: strin
  * row of its own showing all three states, rather than a one-label toggle
  * that took two taps to discover.
  *
- * Key entry sits directly under the picker it belongs to. It used to live on
- * `/voice-profile`, which stopped being reachable when the tab bar replaced
- * the header nav — so picking a provider here left no way to give it a key.
- * That screen keeps the timing controls and is linked at the bottom.
+ * Every voice setting lives here, in one screen. Key entry opens inside the
+ * provider row it belongs to, so picking a provider and being asked for its
+ * key is one action. There was a second screen (`/voice-profile`) holding the
+ * keys and timings; it became unreachable when the tab bar replaced the
+ * header nav, and splitting voice settings across two places was the reason
+ * a picked provider could end up with nowhere to put its key.
  */
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -59,6 +70,7 @@ export default function SettingsScreen() {
   const voiceProfile = useVoiceProfileStore((s) => s.profile);
   const updateAsrConfig = useVoiceProfileStore((s) => s.updateAsrConfig);
   const updateTtsConfig = useVoiceProfileStore((s) => s.updateTtsConfig);
+  const setProfile = useVoiceProfileStore((s) => s.setProfile);
 
   const connection = useConnectionStore((s) => s.connection);
   const dailyLimit = useBudgetStore((s) => s.dailyLimit);
@@ -215,41 +227,65 @@ export default function SettingsScreen() {
 
         <View style={{ gap: theme.spacing.sm }}>
           {sectionLabel('VOICE — SPEECH-TO-TEXT')}
-          <View style={{ gap: 6 }}>
-            {ASR_OPTIONS.map(({ value, label }) =>
-              optionRow(`asr-${value}`, label, voiceProfile.asr.provider === value, () =>
-                void updateAsrConfig({ provider: value }),
-              ),
-            )}
-          </View>
-          {/* Every ASR provider is a cloud service, so this is never optional. */}
-          <Field
-            label="ASR API Key"
-            value={asrKey}
-            onChangeText={onAsrKeyChange}
-            placeholder="paste the provider's key"
-            secret
+          <ProviderPicker
+            options={ASR_OPTIONS}
+            selected={voiceProfile.asr.provider}
+            onSelect={(provider) => void updateAsrConfig({ provider })}
+            keyLabel="ASR API Key"
+            apiKey={asrKey}
+            onApiKeyChange={onAsrKeyChange}
+            testIDPrefix="asr"
           />
         </View>
 
         <View style={{ gap: theme.spacing.sm }}>
           {sectionLabel('VOICE — TEXT-TO-SPEECH')}
+          <ProviderPicker
+            options={TTS_OPTIONS}
+            selected={voiceProfile.tts.provider}
+            onSelect={(provider) => void updateTtsConfig({ provider })}
+            keyLabel="TTS API Key"
+            apiKey={ttsKey}
+            onApiKeyChange={onTtsKeyChange}
+            testIDPrefix="tts"
+          />
+        </View>
+
+        <View style={{ gap: theme.spacing.md }}>
+          {sectionLabel('VOICE — TIMING')}
+          <Stepper
+            label="END OF SPEECH"
+            value={voiceProfile.endOfSpeechTimeoutMs}
+            step={100}
+            min={300}
+            max={3000}
+            onChange={(endOfSpeechTimeoutMs) =>
+              void setProfile({ ...voiceProfile, endOfSpeechTimeoutMs })
+            }
+            unit="ms"
+          />
+          <Stepper
+            label="MAX RECORDING"
+            value={voiceProfile.maxRecordingMs}
+            step={15_000}
+            min={15_000}
+            max={300_000}
+            onChange={(maxRecordingMs) =>
+              void setProfile({ ...voiceProfile, maxRecordingMs })
+            }
+            unit="ms"
+          />
+        </View>
+
+        <View style={{ gap: theme.spacing.sm }}>
+          {sectionLabel('VOICE — ON INTERRUPT')}
           <View style={{ gap: 6 }}>
-            {TTS_OPTIONS.map(({ value, label }) =>
-              optionRow(`tts-${value}`, label, voiceProfile.tts.provider === value, () =>
-                void updateTtsConfig({ provider: value }),
+            {INTERRUPT_OPTIONS.map(({ value, label }) =>
+              optionRow(`interrupt-${value}`, label, voiceProfile.interruptBehavior === value, () =>
+                void setProfile({ ...voiceProfile, interruptBehavior: value }),
               ),
             )}
           </View>
-          {KEYLESS_TTS.includes(voiceProfile.tts.provider) ? null : (
-            <Field
-              label="TTS API Key"
-              value={ttsKey}
-              onChangeText={onTtsKeyChange}
-              placeholder="paste the provider's key"
-              secret
-            />
-          )}
         </View>
 
         <View style={{ gap: theme.spacing.sm }}>
@@ -296,31 +332,6 @@ export default function SettingsScreen() {
           </Text>
         </View>
 
-        {/* Silence timeouts, interrupt behaviour and voice id live on their own
-            screen. It lost its last entry point when the tab bar replaced the
-            header nav; this is it. */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Advanced voice settings"
-          onPress={() => router.push('/voice-profile')}
-          style={{
-            borderColor: theme.colors.steel,
-            borderRadius: theme.radius.sm,
-            borderWidth: 1,
-            paddingHorizontal: 12,
-            paddingVertical: 10,
-          }}
-        >
-          <Text
-            style={{
-              color: theme.colors.inkMuted,
-              fontFamily: theme.fonts.regular,
-              fontSize: theme.type(12.5),
-            }}
-          >
-            ADVANCED VOICE — timings, interrupt, voice id
-          </Text>
-        </Pressable>
       </ScrollView>
     </View>
   );

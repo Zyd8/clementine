@@ -9,9 +9,8 @@ type FieldProps = {
   onChangeText: (value: string) => void;
   placeholder?: string;
   /**
-   * Masks input AND locks it down: no context menu, no autofill. Used for
-   * provider API keys, which are agent access. Not a toggle — a key must be
-   * enterable and unreadable, so the two always travel together.
+   * Masks input and keeps it out of autofill. Used for provider API keys,
+   * which are agent access: they must be pasteable in and not copyable out.
    */
   secret?: boolean;
   invalid?: boolean;
@@ -49,11 +48,13 @@ export function Field({
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={theme.colors.inkMuted}
+        // `secureTextEntry` is doing the security work here, not
+        // `contextMenuHidden`. Both platforms drop Copy and Cut from the
+        // long-press menu on a password field while leaving Paste — which is
+        // exactly the requirement: a key can be pasted in and cannot be read
+        // back out. `contextMenuHidden` would take Paste with it and make a
+        // long key unenterable by hand.
         secureTextEntry={Boolean(secret)}
-        // Masking hides the glyphs; these stop the key leaving the field.
-        // Android's long-press menu still offers Copy on a secureTextEntry
-        // input, and autofill will suggest a saved key into other apps.
-        contextMenuHidden={Boolean(secret)}
         {...(secret
           ? ({
               autoComplete: 'off',

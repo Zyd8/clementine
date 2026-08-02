@@ -82,7 +82,6 @@ export default function RootLayout() {
             "No route named index exists in nested children". */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="voice" options={{ headerShown: false }} />
-        <Stack.Screen name="voice-profile" options={{ title: 'VOICE PROFILE' }} />
         <Stack.Screen name="setup" options={{ title: 'CONNECT HERMES' }} />
       </Stack>
     </SafeAreaProvider>

@@ -72,7 +72,7 @@ describe('SettingsScreen', () => {
     await render(<SettingsScreen />);
     expect(screen.getByText('Groq Whisper (free tier)')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('option-asr-groq'));
+    fireEvent.press(screen.getByTestId('asr-groq'));
     await waitFor(() =>
       expect(useVoiceProfileStore.getState().profile.asr.provider).toBe('groq'),
     );
@@ -82,7 +82,7 @@ describe('SettingsScreen', () => {
     await render(<SettingsScreen />);
     expect(screen.getByText('Edge TTS (free)')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('option-tts-elevenlabs'));
+    fireEvent.press(screen.getByTestId('tts-elevenlabs'));
     await waitFor(() =>
       expect(useVoiceProfileStore.getState().profile.tts.provider).toBe('elevenlabs'),
     );
@@ -96,13 +96,19 @@ describe('SettingsScreen', () => {
 
   /**
    * The bug this covers: the provider pickers lived here while every key
-   * field lived on `/voice-profile`, which nothing routed to any more. You
-   * could pick Groq and have no reachable way to give it a key.
+   * field lived on a second screen that nothing routed to any more. You could
+   * pick Groq and have no reachable way to give it a key.
    */
   describe('provider keys', () => {
-    it('asks for the ASR key beside the ASR picker', async () => {
+    it('opens the key field inside the selected ASR provider’s row', async () => {
       await render(<SettingsScreen />);
+      expect(screen.getByTestId('asr-groq-key')).toBeTruthy();
       expect(screen.getByLabelText('ASR API Key')).toBeTruthy();
+    });
+
+    it('leaves unselected providers closed', async () => {
+      await render(<SettingsScreen />);
+      expect(screen.queryByTestId('asr-deepgram-key')).toBeNull();
     });
 
     it('stores the ASR key as it is typed', async () => {
@@ -124,7 +130,7 @@ describe('SettingsScreen', () => {
 
     /** The phone's own voice and Edge's free endpoint take no key. */
     it.each(['device', 'edge'] as const)(
-      'asks for no TTS key when %s is picked',
+      'opens nothing when the keyless %s voice is picked',
       async (provider) => {
         useVoiceProfileStore.setState({
           profile: { ...VOICE_PROFILE_DEFAULTS, tts: { provider } },
@@ -135,23 +141,45 @@ describe('SettingsScreen', () => {
       },
     );
 
-    it('masks the key and blocks copying it out', async () => {
+    /**
+     * Paste in, no copy out. Masking is what suppresses Copy and Cut on both
+     * platforms; hiding the context menu would take Paste with it and leave a
+     * 56-character key to be typed by hand.
+     */
+    it('masks the key but still allows pasting into it', async () => {
       await render(<SettingsScreen />);
       const input = screen.getByLabelText('ASR API Key');
       expect(input.props.secureTextEntry).toBe(true);
-      expect(input.props.contextMenuHidden).toBe(true);
+      expect(input.props.contextMenuHidden).toBeFalsy();
     });
 
-    /** Timing controls still live on their own screen — it has to be reachable. */
-    it('routes to the advanced voice screen', async () => {
-      const { router } = jest.requireMock('expo-router') as {
-        router: { push: jest.Mock };
-      };
-      router.push.mockClear();
+  });
 
+  describe('voice timing', () => {
+    it('tunes the silence timeout that ends a turn', async () => {
       await render(<SettingsScreen />);
-      fireEvent.press(screen.getByLabelText('Advanced voice settings'));
-      expect(router.push).toHaveBeenCalledWith('/voice-profile');
+      fireEvent.press(screen.getByLabelText('Increase END OF SPEECH'));
+      await waitFor(() =>
+        expect(useVoiceProfileStore.getState().profile.endOfSpeechTimeoutMs).toBe(1000),
+      );
+    });
+
+    it('tunes the maximum recording length', async () => {
+      await render(<SettingsScreen />);
+      fireEvent.press(screen.getByLabelText('Increase MAX RECORDING'));
+      await waitFor(() =>
+        expect(useVoiceProfileStore.getState().profile.maxRecordingMs).toBe(75_000),
+      );
+    });
+
+    it('sets what happens when the user talks over a reply', async () => {
+      await render(<SettingsScreen />);
+      fireEvent.press(screen.getByTestId('option-interrupt-stop_speech_only'));
+      await waitFor(() =>
+        expect(useVoiceProfileStore.getState().profile.interruptBehavior).toBe(
+          'stop_speech_only',
+        ),
+      );
     });
   });
 
