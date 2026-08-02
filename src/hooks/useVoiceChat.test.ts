@@ -1,6 +1,6 @@
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 
-import { createRun, streamRunEvents } from '@/api/runs';
+import { createRun, PHONE_INSTRUCTIONS, stopRun, streamRunEvents, VOICE_INSTRUCTIONS } from '@/api/runs';
 import { useChatStore } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
 import type { StreamEvent } from '@/types/events';
@@ -34,6 +34,7 @@ jest.mock('expo-audio', () => ({
 }));
 
 jest.mock('@/api/runs', () => ({
+  ...jest.requireActual('@/api/runs'),
   createRun: jest.fn(),
   stopRun: jest.fn(),
   streamRunEvents: jest.fn(),
@@ -41,23 +42,27 @@ jest.mock('@/api/runs', () => ({
 
 // Mock TTS so we control when onSentenceEnd/onAllDone/onError fire
 const ttsCallbacks = { current: null as TtsCallbacks | null };
+const ttsProvider = { current: null as TtsProvider | null };
 jest.mock('@/voice/tts', () => {
   const actual = jest.requireActual('@/voice/tts');
   return {
     ...actual,
     createTtsProvider: jest.fn((_config: unknown, callbacks: TtsCallbacks): TtsProvider => {
       ttsCallbacks.current = callbacks;
-      return {
+      const provider: TtsProvider = {
         speak: jest.fn().mockResolvedValue(undefined),
         stop: jest.fn().mockResolvedValue(undefined),
         destroy: jest.fn(),
         isPlaying: jest.fn().mockReturnValue(true),
       };
+      ttsProvider.current = provider;
+      return provider;
     }),
   };
 });
 
 const mockedCreateRun = createRun as jest.MockedFunction<typeof createRun>;
+const mockedStopRun = stopRun as jest.MockedFunction<typeof stopRun>;
 const mockedStream = streamRunEvents as jest.MockedFunction<typeof streamRunEvents>;
 
 /** Turns a fixed list of events into the async iterable the hook consumes. */
@@ -98,6 +103,7 @@ beforeEach(() => {
   });
   mockMetering = -20;
   mockedCreateRun.mockResolvedValue({ runId: 'run_abc', status: 'started' });
+  mockedStopRun.mockResolvedValue(undefined);
   mockedStream.mockReturnValue(streamOf([]));
   ttsCallbacks.current = null;
 });
@@ -843,6 +849,191 @@ describe('useVoiceChat', () => {
       await waitFor(() => {
         expect(result.current.voiceState).not.toBe('LISTENING');
       });
+    });
+  });
+
+  describe('voice-mode instructions', () => {
+    /**
+     * A reply built for reading renders fine on screen but is unlistenable
+     * read aloud — bullet points and headings become word salad through TTS.
+     * Both the standard phone instructions and the voice-specific ones must
+     * go through; this doesn't replace PHONE_INSTRUCTIONS, it adds to them.
+     */
+    it('asks for a short, spoken-friendly reply, on top of the phone instructions', async () => {
+      const { result } = await renderHook(() => useVoiceChat());
+
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      const [, , options] = mockedCreateRun.mock.calls[0]!;
+      expect(options.instructions).toContain(PHONE_INSTRUCTIONS);
+      expect(options.instructions).toContain(VOICE_INSTRUCTIONS);
+    });
+  });
+
+  describe('spoken tool status', () => {
+    /**
+     * A tool call is silence otherwise: the reply hasn't started, and voice
+     * mode has no visible feed the way chat does, so a slow tool reads as
+     * the app having hung.
+     */
+    it('speaks a status line when a tool starts', async () => {
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'tool.started', tool: 'web_search', args: '{}' } as StreamEvent,
+          { type: 'assistant.delta', text: 'Found it.' } as StreamEvent,
+          { type: 'run.completed', output: 'Found it.' } as StreamEvent,
+        ]),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      const speak = ttsProvider.current?.speak as jest.Mock;
+      expect(speak.mock.calls.some(([text]) => String(text).includes('web_search'))).toBe(
+        true,
+      );
+    });
+
+    /**
+     * The regression this guards: narration finishing while the tool is
+     * still running used to fire the same onAllDone path the real reply
+     * uses, which read as "reply complete" and reopened the mic mid-task.
+     */
+    it('does not treat tool narration finishing as the reply being done', async () => {
+      // The tool call is deliberately never resolved during the assertions —
+      // this stands in for "still running", the exact moment narration
+      // finishing must not be mistaken for the reply being done.
+      let resolveHeld: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        resolveHeld = resolve;
+      });
+      mockedStream.mockReturnValue(
+        (async function* () {
+          yield { type: 'tool.started', tool: 'web_search', args: '{}' } as StreamEvent;
+          await held;
+        })(),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+
+      // Deliberately not awaited to completion — handleEndOfSpeech awaits
+      // sendRun, which is itself stuck on `held`. A short async act lets the
+      // synchronous PROCESSING transition and the mocked asr.stop()/createRun
+      // microtasks flush without blocking on the whole chain.
+      await act(async () => {
+        void result.current.simulateEndOfSpeech();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      await waitFor(() => {
+        expect(result.current.voiceState).toBe('PROCESSING');
+      });
+
+      await act(async () => {
+        ttsCallbacks.current?.onAllDone();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      // Still not relistening — the run is still open.
+      expect(result.current.voiceState).toBe('PROCESSING');
+
+      resolveHeld();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    });
+  });
+
+  describe('leaveVoiceMode', () => {
+    /**
+     * Leaving the screen is a full stop: unlike the ring's interrupt, there
+     * is no follow-up to hand the turn back for, so it must never reopen
+     * the mic — and unlike the phone-call interruption handler, it always
+     * cancels the run rather than leaving it running unheard.
+     */
+    it('stops TTS, cancels the run, and goes idle without relistening', async () => {
+      // run.completed held back — the store clears activeRun the instant it
+      // arrives, so the run has to genuinely still be open (still speaking)
+      // for there to be anything for leaveVoiceMode to cancel.
+      let resolveHeld: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        resolveHeld = resolve;
+      });
+      mockedStream.mockReturnValue(
+        (async function* () {
+          yield { type: 'assistant.delta', text: 'A long reply.' } as StreamEvent;
+          await held;
+        })(),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        void result.current.simulateEndOfSpeech();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await waitFor(() => {
+        expect(result.current.voiceState).toBe('PLAYING');
+      });
+
+      await act(async () => {
+        result.current.leaveVoiceMode();
+      });
+
+      expect(result.current.voiceState).toBe('IDLE');
+      expect(mockedStopRun).toHaveBeenCalledWith(
+        'http://localhost:8642',
+        'test-key',
+        'run_abc',
+      );
+
+      // Confirm it never relistens: waiting past the deferred-tick window
+      // used elsewhere for the auto-relisten must not move it off IDLE.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      expect(result.current.voiceState).toBe('IDLE');
+
+      resolveHeld();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    });
+
+    it('is safe to call from IDLE, with nothing running', async () => {
+      const { result } = await renderHook(() => useVoiceChat());
+
+      expect(() => {
+        result.current.leaveVoiceMode();
+      }).not.toThrow();
+      expect(result.current.voiceState).toBe('IDLE');
     });
   });
 });

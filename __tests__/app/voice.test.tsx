@@ -19,6 +19,7 @@ jest.mock('expo-router', () => ({
 }));
 
 const mockTapMic = jest.fn();
+const mockLeaveVoiceMode = jest.fn();
 let mockVoiceState: VoiceChatState = 'LISTENING';
 let mockTranscript = '';
 
@@ -30,6 +31,7 @@ jest.mock('@/hooks/useVoiceChat', () => ({
     speechThreshold: 0.4,
     voiceStatus: '',
     tapMic: mockTapMic,
+    leaveVoiceMode: mockLeaveVoiceMode,
   }),
 }));
 
@@ -67,7 +69,7 @@ describe('VoiceScreen', () => {
     await show();
     expect(screen.getByText('VOICE MODE')).toBeTruthy();
     expect(screen.getByText('TOOL FEED STAYS LIVE IN CHAT')).toBeTruthy();
-    expect(screen.getByLabelText('Stop and return')).toBeTruthy();
+    expect(screen.getByLabelText('Close voice mode')).toBeTruthy();
   });
 
   /** The user tapped a mic to get here — opening the screen is the tap. */
@@ -141,24 +143,38 @@ describe('VoiceScreen', () => {
     });
   });
 
-  it('stops the session and returns on close', async () => {
-    const { router } = jest.requireMock('expo-router') as {
-      router: { back: jest.Mock };
-    };
-    router.back.mockClear();
+  /**
+   * Closing always fully stops, regardless of where the machine is — leaving
+   * the screen ends the exchange, unlike tapping the ring mid-call, which
+   * hands the turn back for a follow-up. The AI must not keep talking into a
+   * screen the user just left.
+   */
+  it.each(['IDLE', 'LISTENING', 'PROCESSING', 'PLAYING'] as const)(
+    'fully stops and returns on close from %s',
+    async (state) => {
+      const { router } = jest.requireMock('expo-router') as {
+        router: { back: jest.Mock };
+      };
+      router.back.mockClear();
+      mockLeaveVoiceMode.mockClear();
+      mockVoiceState = state;
 
-    await show();
-    fireEvent.press(screen.getByLabelText('Stop and return'));
-    expect(mockTapMic).toHaveBeenCalled();
-    expect(router.back).toHaveBeenCalled();
-  });
+      await show();
+      fireEvent.press(screen.getByLabelText('Close voice mode'));
 
-  it('returns without a teardown tap when nothing is running', async () => {
-    mockVoiceState = 'IDLE';
+      expect(mockLeaveVoiceMode).toHaveBeenCalled();
+      expect(router.back).toHaveBeenCalled();
+    },
+  );
+
+  /** Closing is a full stop, distinct from the ring's interrupt-and-listen tap. */
+  it('does not tap the ring machinery on close', async () => {
+    mockVoiceState = 'PLAYING';
     await show();
     mockTapMic.mockClear();
 
     fireEvent.press(screen.getByLabelText('Close voice mode'));
+
     expect(mockTapMic).not.toHaveBeenCalled();
   });
 });
@@ -235,6 +251,16 @@ describe('VoiceScreen — dedicated interrupt button', () => {
     await show();
 
     expect(screen.getByTestId('voice-interrupt-button')).toBeTruthy();
+  });
+
+  /** Big enough to hit reliably, not a small easily-missed tap target. */
+  it('is sized to be easy to hit, not a small icon', async () => {
+    mockVoiceState = 'PLAYING';
+    await show();
+
+    const style = flatten(screen.getByTestId('voice-interrupt-button').props.style);
+    expect(style.width).toBeGreaterThanOrEqual(48);
+    expect(style.height).toBeGreaterThanOrEqual(48);
   });
 
   it('interrupts on press', async () => {

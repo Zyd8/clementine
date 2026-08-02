@@ -1,6 +1,13 @@
 import * as Sentry from '@sentry/react-native';
 
-import { createRun, getRun, resolveApproval, stopRun, streamRunEvents } from './runs';
+import {
+  createRun,
+  getRun,
+  PHONE_INSTRUCTIONS,
+  resolveApproval,
+  stopRun,
+  streamRunEvents,
+} from './runs';
 
 const BASE = 'http://100.106.162.39:8642';
 const KEY = 'a3f1c09b8e7d6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b';
@@ -58,6 +65,19 @@ describe('createRun', () => {
     await expect(createRun(BASE, KEY, { input: 'hi' })).resolves.toMatchObject({
       runId: 'run_abc',
     });
+  });
+
+  it('defaults to the phone instructions when none are given', async () => {
+    await createRun(BASE, KEY, { input: 'hi' });
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(JSON.parse(init.body).instructions).toBe(PHONE_INSTRUCTIONS);
+  });
+
+  /** Voice mode overrides this — see the useVoiceChat tests. */
+  it('sends a caller-supplied instructions string instead, when given one', async () => {
+    await createRun(BASE, KEY, { input: 'hi', instructions: 'custom' });
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(JSON.parse(init.body).instructions).toBe('custom');
   });
 
   it('propagates an auth failure as a distinguishable error', async () => {

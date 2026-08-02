@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VoiceMeter } from '@/components/features/VoiceMeter';
 import { VoiceWaveform } from '@/components/features/VoiceWaveform';
 import { SpeechPulse } from '@/components/ui/SpeechPulse';
+import { useSyntheticSpeechLevel } from '@/hooks/useSyntheticSpeechLevel';
 import { useTheme } from '@/hooks/useTheme';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useProfilesStore } from '@/stores/profiles';
@@ -48,7 +49,7 @@ export default function VoiceScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const profileId = useProfilesStore((s) => s.activeProfileId)();
-  const { voiceState, liveTranscript, audioLevel, speechThreshold, voiceStatus, tapMic } =
+  const { voiceState, liveTranscript, audioLevel, speechThreshold, voiceStatus, tapMic, leaveVoiceMode } =
     useVoiceChat(profileId);
 
   // Transcription is a cloud call now, so voice mode cannot start without a
@@ -68,12 +69,19 @@ export default function VoiceScreen() {
   }, []);
 
   const thinking = voiceState === 'PROCESSING';
+  const playing = voiceState === 'PLAYING';
   const accent = thinking ? theme.colors.inkMuted : theme.colors.gold;
 
+  // There is no real level to read for the AI's own voice — see the hook's
+  // own comment — so the ring shows plausible motion while it speaks rather
+  // than the user's (silent, mic-closed) level held over from before.
+  const speakingLevel = useSyntheticSpeechLevel(playing);
+
   const close = () => {
-    // Cancels a recording or interrupts playback, depending on where the
-    // machine is; IDLE needs no teardown.
-    if (voiceState !== 'IDLE') void tapMic();
+    // Always a full stop: leaving the screen ends the exchange, it does not
+    // hand the turn back for a follow-up the way tapping the ring mid-call
+    // does. The AI must not keep talking into a screen the user just left.
+    leaveVoiceMode();
     router.back();
   };
 
@@ -166,7 +174,7 @@ export default function VoiceScreen() {
           }}
         >
           <VoiceWaveform
-            level={audioLevel}
+            level={playing ? speakingLevel : audioLevel}
             isActive={!thinking}
             barCount={6}
             testID="voice-waveform"
@@ -181,40 +189,6 @@ export default function VoiceScreen() {
             testID="voice-speech-pulse"
           />
         </Pressable>
-
-        {/* Tapping the ring already interrupts, but nothing on screen said
-            so. A small stop-shaped button underneath makes it discoverable
-            while the reply plays, which is the only state where
-            interrupting is possible. Faint red rather than solid — this is
-            an option sitting under the reply, not an alarm. */}
-        {voiceState === 'PLAYING' ? (
-          <Pressable
-            testID="voice-interrupt-button"
-            accessibilityRole="button"
-            accessibilityLabel="Interrupt and start listening"
-            onPress={() => void tapMic()}
-            hitSlop={8}
-            style={{
-              alignItems: 'center',
-              backgroundColor: `${theme.colors.err}26`,
-              borderColor: `${theme.colors.err}66`,
-              borderRadius: theme.radius.full,
-              borderWidth: 1,
-              height: 36,
-              justifyContent: 'center',
-              width: 36,
-            }}
-          >
-            <View
-              style={{
-                backgroundColor: theme.colors.err,
-                borderRadius: 2,
-                height: 12,
-                width: 12,
-              }}
-            />
-          </Pressable>
-        ) : null}
 
         <Text
           testID="voice-transcript"
@@ -264,6 +238,40 @@ export default function VoiceScreen() {
         >
           TOOL FEED STAYS LIVE IN CHAT
         </Text>
+
+        {/* Tapping the ring already interrupts, but nothing on screen said
+            so. A clearly-sized stop button below makes it discoverable
+            while the reply plays, which is the only state where
+            interrupting is possible. Faint red rather than solid — this is
+            an option sitting under the reply, not an alarm. */}
+        {playing ? (
+          <Pressable
+            testID="voice-interrupt-button"
+            accessibilityRole="button"
+            accessibilityLabel="Interrupt and start listening"
+            onPress={() => void tapMic()}
+            hitSlop={8}
+            style={{
+              alignItems: 'center',
+              backgroundColor: `${theme.colors.err}26`,
+              borderColor: `${theme.colors.err}66`,
+              borderRadius: theme.radius.full,
+              borderWidth: 1,
+              height: 56,
+              justifyContent: 'center',
+              width: 56,
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: theme.colors.err,
+                borderRadius: 3,
+                height: 18,
+                width: 18,
+              }}
+            />
+          </Pressable>
+        ) : null}
       </View>
 
       {/* Bottom-left: what the mic is actually deciding, and the one knob
@@ -278,33 +286,6 @@ export default function VoiceScreen() {
           listening={voiceState === 'LISTENING'}
           testID="voice-meter"
         />
-      </View>
-
-      <View style={{ alignItems: 'center', padding: 20 }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Stop and return"
-          onPress={close}
-          style={{
-            backgroundColor: theme.colors.canvasRaised,
-            borderColor: theme.colors.steel,
-            borderRadius: theme.radius.full,
-            borderWidth: 1,
-            paddingHorizontal: 24,
-            paddingVertical: 12,
-          }}
-        >
-          <Text
-            style={{
-              color: theme.colors.ink,
-              fontFamily: theme.fonts.regular,
-              fontSize: theme.type(12),
-              letterSpacing: 0.6,
-            }}
-          >
-            STOP &amp; RETURN
-          </Text>
-        </Pressable>
       </View>
     </View>
   );

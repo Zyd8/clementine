@@ -2,7 +2,7 @@ import * as Sentry from '@sentry/react-native';
 import { useAudioRecorder } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { createRun, stopRun, streamRunEvents } from '@/api/runs';
+import { createRun, PHONE_INSTRUCTIONS, stopRun, streamRunEvents, VOICE_INSTRUCTIONS } from '@/api/runs';
 import { useChatStore, type ProfileId } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
 import { useUsageStore } from '@/stores/usage';
@@ -136,7 +136,13 @@ export function useVoiceChat(profileId: ProfileId = null) {
       let runId: string | undefined;
 
       try {
-        const handle = await createRun(baseUrl, apiKey, { input });
+        // Voice replies get their own instructions layered on top of the
+        // standard phone ones — a reply built for reading is unlistenable
+        // read aloud.
+        const handle = await createRun(baseUrl, apiKey, {
+          input,
+          instructions: `${PHONE_INSTRUCTIONS} ${VOICE_INSTRUCTIONS}`,
+        });
         runId = handle.runId;
         store.setActiveRun(profileId, runId);
 
@@ -151,8 +157,12 @@ export function useVoiceChat(profileId: ProfileId = null) {
             // Sentence finished — next will auto-play if queued.
           },
           onAllDone: () => {
-            setStatus('Reply complete');
+            // Tool-status narration (below) also finishes through this
+            // callback while the run is still PROCESSING — that is not the
+            // reply ending, so nothing here should fire until real reply
+            // content has actually put the machine into PLAYING.
             if (stateRef.current !== 'PLAYING') return;
+            setStatus('Reply complete');
             // The reply finishing is the cue to listen again — a conversation
             // does not require a tap between every turn. Deferred by a tick so
             // sendRun's `finally` clears its in-flight guard first; without
@@ -194,6 +204,23 @@ export function useVoiceChat(profileId: ProfileId = null) {
                 setStatus('Speaking…');
                 transition('PLAYING');
               }
+            });
+          }
+
+          if (event.type === 'tool.started') {
+            // Otherwise a tool call is silence: the reply hasn't started
+            // and there is no visible feed on this screen, so a slow tool
+            // reads as the app having hung. Speaks over the same TTS
+            // instance the reply will use, so it queues before the reply
+            // rather than talking over it — deliberately NOT transitioning
+            // to PLAYING, so this can't be mistaken for the reply finishing
+            // if the tool is still running when it stops speaking.
+            setStatus(`Using ${event.tool}…`);
+            void tts.speak(`One moment, using ${event.tool}.`).catch((err) => {
+              Sentry.captureException(
+                err instanceof Error ? err : new Error(String(err)),
+                { tags: { reason: 'voice' } },
+              );
             });
           }
 
@@ -463,6 +490,37 @@ export function useVoiceChat(profileId: ProfileId = null) {
     enterIdle();
   }, [enterIdle]);
 
+  // ---- Leaving the screen (× / back) ----
+
+  /**
+   * Full stop, for leaving voice mode entirely.
+   *
+   * Unlike `interruptPlayback` this never re-enters LISTENING — there is no
+   * screen left to listen on — and unlike `handleAudioInterruption` it always
+   * cancels the underlying Hermes run rather than leaving it running
+   * unheard, since closing the screen is the user ending the exchange, not a
+   * transient distraction to resume from.
+   */
+  const leaveVoiceMode = useCallback(() => {
+    ttsRef.current?.stop().catch(() => undefined);
+    ttsRef.current = null;
+
+    const runId = useChatStore.getState().activeRun(profileId);
+    if (connection && runId) {
+      void stopRun(connection.baseUrl, connection.apiKey, runId).catch(() => undefined);
+    }
+
+    asrRef.current?.cancel();
+    asrRef.current = null;
+
+    vadRef.current?.cancel();
+    vadRef.current = null;
+
+    sentenceBufRef.current.reset();
+
+    enterIdle();
+  }, [connection, profileId, enterIdle]);
+
   // ---- Main tap handler ----
 
   const tapMic = useCallback(async () => {
@@ -536,6 +594,7 @@ export function useVoiceChat(profileId: ProfileId = null) {
 
     // Audio session interruption handler (for incoming calls, etc.)
     handleAudioInterruption,
+    leaveVoiceMode,
 
     // Exposed for the test harness and provider bridging.
     simulateEndOfSpeech: handleEndOfSpeech,

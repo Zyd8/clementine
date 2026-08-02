@@ -37,17 +37,32 @@ export type RunState = {
 export const PHONE_INSTRUCTIONS =
   'You are talking to a phone app (Clementine). To show an image, reply with the image URL inline (https://...) — do NOT download the image to disk, do NOT emit MEDIA:<local-path> tags; the phone cannot fetch files from the host.';
 
+/**
+ * Appended to `PHONE_INSTRUCTIONS` for voice-originated turns.
+ *
+ * A reply built for reading renders fine on screen but is unlistenable read
+ * aloud — bullet points and headings become word salad through TTS, and a
+ * long answer makes the user wait through a wall of speech before they can
+ * respond. This does not replace `PHONE_INSTRUCTIONS`; both are sent.
+ */
+export const VOICE_INSTRUCTIONS =
+  'This reply will be spoken aloud by text-to-speech, not read on a screen. Keep it short and conversational — a sentence or two for anything simple. Do not use bullet points, numbered lists, headings, code blocks, or other visual formatting; say it the way a person would say it out loud. If the full answer is long, give the short version and offer to go into more detail.';
+
 export async function createRun(
   baseUrl: string,
   credential: string,
-  { input, sessionId }: { input: string; sessionId?: string },
+  {
+    input,
+    sessionId,
+    instructions = PHONE_INSTRUCTIONS,
+  }: { input: string; sessionId?: string; instructions?: string },
 ): Promise<RunHandle> {
   const body = await makeClient(baseUrl, credential).post<{
     run_id: string;
     status?: RunStatus;
   }>('/v1/runs', {
     input,
-    instructions: PHONE_INSTRUCTIONS,
+    instructions,
     ...(sessionId ? { session_id: sessionId } : {}),
   });
 
