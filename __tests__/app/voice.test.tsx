@@ -163,3 +163,62 @@ describe('VoiceScreen', () => {
   });
 });
 
+
+/**
+ * The ring is the only affordance on this screen — no separate mic button.
+ * It was a plain View, so there was no way to reach the state machine's
+ * cancel/interrupt paths at all; both existed and were unreachable.
+ */
+describe('VoiceScreen — the ring as a tap target', () => {
+  it('hands a tap on the ring to the state machine while the reply plays', async () => {
+    mockVoiceState = 'PLAYING';
+    await show();
+    mockTapMic.mockClear();
+
+    fireEvent.press(screen.getByTestId('voice-ring'));
+
+    expect(mockTapMic).toHaveBeenCalled();
+  });
+
+  it('hands a tap on the ring to the state machine while listening', async () => {
+    mockVoiceState = 'LISTENING';
+    await show();
+    mockTapMic.mockClear();
+
+    fireEvent.press(screen.getByTestId('voice-ring'));
+
+    expect(mockTapMic).toHaveBeenCalled();
+  });
+
+  it('says a tap will interrupt while the reply plays', async () => {
+    mockVoiceState = 'PLAYING';
+    await show();
+
+    expect(screen.getByTestId('voice-ring').props.accessibilityLabel).toMatch(
+      /interrupt/i,
+    );
+  });
+
+  it('says a tap will stop listening while listening', async () => {
+    mockVoiceState = 'LISTENING';
+    await show();
+
+    expect(screen.getByTestId('voice-ring').props.accessibilityLabel).toMatch(
+      /stop listening/i,
+    );
+  });
+
+  /** Nothing to interrupt yet — the ring goes inert rather than swallowing a tap. */
+  it('disables the ring while thinking, with nothing to interrupt', async () => {
+    mockVoiceState = 'PROCESSING';
+    await show();
+
+    expect(screen.getByTestId('voice-ring').props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true }),
+    );
+
+    mockTapMic.mockClear();
+    fireEvent.press(screen.getByTestId('voice-ring'));
+    expect(mockTapMic).not.toHaveBeenCalled();
+  });
+});

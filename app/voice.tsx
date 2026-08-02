@@ -24,6 +24,14 @@ const LABELS: Record<VoiceChatState, string> = {
   PLAYING: 'speaking',
 };
 
+/** What a tap on the ring does from each state — read by screen readers. */
+const RING_LABELS: Record<VoiceChatState, string> = {
+  IDLE: 'Start listening',
+  LISTENING: 'Stop listening',
+  PROCESSING: 'Thinking — nothing to interrupt yet',
+  PLAYING: 'Interrupt and start listening',
+};
+
 /**
  * Full-screen voice mode.
  *
@@ -132,8 +140,18 @@ export default function VoiceScreen() {
           {needsKey ? 'voice needs a key' : LABELS[voiceState]}
         </Text>
 
-        <View
+        {/* The ring is the only affordance on this screen — no separate mic
+            button. What a tap does depends on where the turn is: opens the
+            mic from IDLE, cancels a recording from LISTENING, and cuts the
+            reply off from PLAYING. Nothing to interrupt during PROCESSING,
+            so it's inert then rather than silently swallowing a tap. */}
+        <Pressable
           testID="voice-ring"
+          accessibilityRole="button"
+          accessibilityLabel={RING_LABELS[voiceState]}
+          accessibilityState={{ disabled: thinking }}
+          disabled={thinking}
+          onPress={() => void tapMic()}
           style={{
             alignItems: 'center',
             backgroundColor: theme.colors.canvasRaised,
@@ -162,7 +180,7 @@ export default function VoiceScreen() {
             inset={6}
             testID="voice-speech-pulse"
           />
-        </View>
+        </Pressable>
 
         <Text
           testID="voice-transcript"
