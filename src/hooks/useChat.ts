@@ -124,10 +124,18 @@ export function useChat(profileId: ProfileId = null) {
             wireInput = [text, ...encoded].filter(Boolean).join('\n\n');
           } catch (err) {
             // No run started — nothing to reconcile, just say what failed.
+            // The real error is included rather than a flat generic string:
+            // this can fail for reasons that look identical from the outside
+            // (a cloud-only photo not yet downloaded locally, a content URI
+            // the file reader can't open, a permissions gap) and a vague
+            // message gives no way to tell which one actually happened.
+            Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+              tags: { reason: 'attachment' },
+            });
             const message =
               err instanceof AttachmentTooLargeError
                 ? err.message
-                : 'Could not attach that file.';
+                : `Could not attach that file: ${err instanceof Error ? err.message : String(err)}`;
             store.applyEvent(profileId, { type: 'run.failed', message });
             return;
           }

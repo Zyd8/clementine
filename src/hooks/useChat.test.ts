@@ -8,8 +8,20 @@ import { useChatStore } from '@/stores/chat';
 import { useUsageStore } from '@/stores/usage';
 import { useConnectionStore } from '@/stores/connection';
 import type { StreamEvent } from '@/types/events';
+import { encodeAttachmentForPrompt } from '@/utils/attachmentEncoding';
 
 import { useChat } from './useChat';
+
+// Real by default (the actual encode + size-cap logic is what the
+// "attachments" describe block below exercises); overridden per-test with
+// `mockRejectedValueOnce` where a specific non-size failure is needed.
+jest.mock('@/utils/attachmentEncoding', () => ({
+  ...jest.requireActual('@/utils/attachmentEncoding'),
+  encodeAttachmentForPrompt: jest.fn(jest.requireActual('@/utils/attachmentEncoding').encodeAttachmentForPrompt),
+}));
+const mockedEncode = encodeAttachmentForPrompt as jest.MockedFunction<
+  typeof encodeAttachmentForPrompt
+>;
 
 jest.mock('@/api/runs', () => ({
   ...jest.requireActual('@/api/runs'),
@@ -722,6 +734,35 @@ describe('useChat', () => {
         expect.objectContaining({ kind: 'user' }),
         expect.objectContaining({ kind: 'error', text: expect.stringContaining('photo.jpg') }),
       ]);
+    });
+
+    /**
+     * A generic "Could not attach that file" hid what actually went wrong —
+     * on a real device this can fail for several distinct reasons that look
+     * identical from the outside (a cloud-only photo not yet downloaded
+     * locally, a content URI the file reader can't open, a permissions gap),
+     * and a vague message gave no way to tell which one happened.
+     */
+    it('includes the real error when encoding fails for a reason other than size', async () => {
+      mockedEncode.mockRejectedValueOnce(new Error('could not read file at path'));
+
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('check this out', [IMAGE]);
+      });
+
+      expect(mockedCreateRun).not.toHaveBeenCalled();
+      expect(feed()).toEqual([
+        expect.objectContaining({ kind: 'user' }),
+        expect.objectContaining({
+          kind: 'error',
+          text: expect.stringContaining('could not read file at path'),
+        }),
+      ]);
+      expect(Sentry.captureException).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ tags: { reason: 'attachment' } }),
+      );
     });
 
     it('clears the in-flight guard after an oversized attachment, so the next send works', async () => {
