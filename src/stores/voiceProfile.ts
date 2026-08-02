@@ -17,7 +17,8 @@ import {
  * "Voice keys are the USER's; the connection (and its profiles) are the
  * AGENT's." Two stores, zero overlap.
  *
- * Free-first defaults: whisper_cpp + Edge TTS = working voice, zero keys.
+ * Defaults: Groq Whisper ASR (free tier, needs a key) + the platform's own
+ * TTS voice (free, offline, no key).
  * BYO providers (Groq/Deepgram/OpenAI ASR, ElevenLabs/OpenAI/MiniMax TTS)
  * are configured here.
  */

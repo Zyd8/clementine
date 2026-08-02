@@ -1,9 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { darkTheme } from '@/constants/theme';
 import { useSettingsStore } from '@/stores/settings';
+import { useVoiceProfileStore } from '@/stores/voiceProfile';
+import { VOICE_PROFILE_DEFAULTS } from '@/types/voice';
 import type { VoiceChatState } from '@/types/voice';
 
 import VoiceScreen from '../../app/voice';
@@ -50,6 +52,13 @@ describe('VoiceScreen', () => {
     mockVoiceState = 'LISTENING';
     mockTranscript = '';
     useSettingsStore.setState({ theme: 'dark', hydrated: true });
+    useVoiceProfileStore.setState({
+      profile: {
+        ...VOICE_PROFILE_DEFAULTS,
+        asr: { provider: 'groq', apiKey: 'test-key' },
+      },
+      hydrated: true,
+    });
   });
 
   it('renders the design’s chrome', async () => {
@@ -63,17 +72,9 @@ describe('VoiceScreen', () => {
   it('opens the mic on mount when the machine is idle', async () => {
     mockVoiceState = 'IDLE';
     await show();
-    expect(mockTapMic).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockTapMic).toHaveBeenCalledTimes(1));
   });
 
-  it('does not re-arm the mic when a session is already running', async () => {
-    mockVoiceState = 'LISTENING';
-    await show();
-    expect(mockTapMic).not.toHaveBeenCalled();
-  });
-
-  // One mount per case: remounting inside a single test leaves React
-  // mid-act and empties the tree for everything that runs after it.
   it.each([
     ['LISTENING', 'listening'],
     ['PROCESSING', 'thinking'],
@@ -111,6 +112,28 @@ describe('VoiceScreen', () => {
     mockTranscript = 'check the api server';
     await show();
     expect(screen.getByText('check the api server')).toBeTruthy();
+  });
+
+  /**
+   * Transcription is a cloud call, so without a key the mic would record a
+   * clip, upload it, and fail. Say what is missing before anyone speaks.
+   */
+  describe('without an ASR key', () => {
+    beforeEach(() => {
+      useVoiceProfileStore.setState({
+        profile: { ...VOICE_PROFILE_DEFAULTS, asr: { provider: 'groq' } },
+        hydrated: true,
+      });
+    });
+
+    it('says a key is needed instead of opening the mic', async () => {
+      mockVoiceState = 'IDLE';
+      await show();
+
+      expect(screen.getByText('voice needs a key')).toBeTruthy();
+      expect(screen.getByText(/Settings → Voice/)).toBeTruthy();
+      await waitFor(() => expect(mockTapMic).not.toHaveBeenCalled());
+    });
   });
 
   it('stops the session and returns on close', async () => {

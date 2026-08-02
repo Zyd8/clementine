@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/react-native';
+import * as Speech from 'expo-speech';
 
 import type { TtsProviderConfig } from '@/types/voice';
 
@@ -18,7 +19,8 @@ import type { TtsProviderConfig } from '@/types/voice';
  * fall back to text-only display or surface an error toast. This module
  * reports failures to Sentry.
  *
- * Native packages (expo-av, expo-audio) are NOT installed — the interface
+ * `device` is implemented against expo-speech. The cloud providers below
+ * remain interface-only — the interface
  * contract is testable via mocks. Real audio playback requires these packages.
  */
 
@@ -50,6 +52,8 @@ export function createTtsProvider(
   callbacks: TtsCallbacks,
 ): TtsProvider {
   switch (config.provider) {
+    case 'device':
+      return createDeviceTtsProvider(callbacks);
     case 'edge':
       return createEdgeTtsProvider(callbacks);
     case 'elevenlabs':
@@ -59,6 +63,76 @@ export function createTtsProvider(
     case 'minimax':
       return createMiniMaxTtsProvider(config.apiKey ?? '', config.voiceId ?? '', callbacks);
   }
+}
+
+// ---- Device TTS (free default, on-device) ----
+
+/**
+ * The platform's own speech engine.
+ *
+ * Free, offline, no key, and it matches the ASR story: nothing about a voice
+ * turn leaves the phone. Every sentence the agent streams is queued here as
+ * `sentenceBuffer` closes it, so playback starts before the reply is finished
+ * rather than after.
+ */
+function createDeviceTtsProvider(callbacks: TtsCallbacks): TtsProvider {
+  let playing = false;
+  // Sentences arrive faster than they are spoken, so track how many are still
+  // outstanding — `onAllDone` must fire when the last one ends, not the first.
+  let queued = 0;
+  let stopped = false;
+
+  return {
+    speak: async (text: string): Promise<void> => {
+      const utterance = text.trim();
+      if (!utterance) return;
+
+      stopped = false;
+      playing = true;
+      queued += 1;
+
+      const finish = () => {
+        queued = Math.max(0, queued - 1);
+        callbacks.onSentenceEnd();
+        if (queued === 0) {
+          playing = false;
+          if (!stopped) callbacks.onAllDone();
+        }
+      };
+
+      Speech.speak(utterance, {
+        onDone: finish,
+        onStopped: () => {
+          // A stop empties the whole queue at once; unwinding it one
+          // callback at a time would fire onAllDone early.
+          queued = 0;
+          playing = false;
+        },
+        onError: (error: Error) => {
+          queued = Math.max(0, queued - 1);
+          if (queued === 0) playing = false;
+          Sentry.captureException(error, { tags: { reason: 'voice' } });
+          callbacks.onError(error);
+        },
+      });
+    },
+
+    stop: async (): Promise<void> => {
+      stopped = true;
+      queued = 0;
+      playing = false;
+      await Speech.stop();
+    },
+
+    destroy: (): void => {
+      stopped = true;
+      queued = 0;
+      playing = false;
+      void Speech.stop();
+    },
+
+    isPlaying: (): boolean => playing,
+  };
 }
 
 // ---- Edge TTS (free default) ----

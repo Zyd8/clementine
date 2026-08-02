@@ -1,28 +1,23 @@
 import * as Sentry from '@sentry/react-native';
-// `whisper.rn/index`, not `whisper.rn`: the package's exports map defines
-// only `./*` subpaths with no `.` entry, so the bare specifier fails under
-// bundler resolution. Metro resolves both; TypeScript resolves only this one.
-import { initWhisper, type WhisperContext } from 'whisper.rn/index';
 
 import type { AsrProviderConfig } from '@/types/voice';
 
 import type { Recorder } from './recorder';
-import { ensureModel } from './whisperModel';
 
 /**
  * ASR (Automatic Speech Recognition) provider interface.
  *
  * The boundary between the voice chat system and the actual speech recognition
- * backend. Free-first: the default is on-device whisper.cpp (no key required).
+ * backend. The default is Groq Whisper on its free tier.
  * BYO providers (Groq Whisper, Deepgram, OpenAI Whisper) are the upgrade path.
  *
  * The provider interface is deliberately abstract so tests inject fake
- * implementations and real native bindings (whisper.cpp RN, etc.) plug in
- * behind the same contract.
+ * implementations and additional cloud backends plug in behind the same
+ * contract.
  *
- * `whisper_cpp` is implemented against whisper.rn and runs entirely
- * on-device: no key, no network, nothing leaves the phone. The BYO cloud
- * providers remain interface-only.
+ * `groq` is implemented: it records a clip and posts it to Groq's Whisper
+ * endpoint, whose free tier covers far more than one person can speak.
+ * Deepgram and OpenAI remain interface-only.
  */
 
 export type AsrResult = {
@@ -51,18 +46,16 @@ export interface AsrProvider {
 /**
  * Create the ASR provider for the given config.
  *
- * `whisper_cpp` needs a recorder to capture from; the cloud providers are
- * still interface-only and ignore it.
+ * Every provider needs a recorder to capture from — transcription is a
+ * network call over a clip this app records itself.
  */
 export function createAsrProvider(
   config: AsrProviderConfig,
   recorder?: Recorder,
 ): AsrProvider {
   switch (config.provider) {
-    case 'whisper_cpp':
-      return createWhisperCppProvider(recorder);
     case 'groq':
-      return createGroqProvider(config.apiKey ?? '');
+      return createGroqProvider(config.apiKey ?? '', recorder);
     case 'deepgram':
       return createDeepgramProvider(config.apiKey ?? '');
     case 'openai':
@@ -70,110 +63,109 @@ export function createAsrProvider(
   }
 }
 
-// ---- whisper.cpp (free default, on-device) ----
+// ---- Groq Whisper ----
 
-/**
- * The loaded model, kept for the process lifetime.
- *
- * Initialising a context reads ~75MB off disk and costs seconds; doing it per
- * utterance would put that in front of every single turn.
- */
-let sharedContext: WhisperContext | null = null;
+/** Free tier at time of writing: 2,000 requests/day, 28,800 audio seconds/day. */
+const GROQ_TRANSCRIBE_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
-async function whisperContext(): Promise<WhisperContext> {
-  if (sharedContext) return sharedContext;
-  const filePath = await ensureModel();
-  sharedContext = await initWhisper({ filePath });
-  return sharedContext;
-}
+/** Turbo is several times faster than large-v3 at the same free-tier limits. */
+const GROQ_MODEL = 'whisper-large-v3-turbo';
 
-function createWhisperCppProvider(recorder?: Recorder): AsrProvider {
+function createGroqProvider(apiKey: string, recorder?: Recorder): AsrProvider {
+  let abortController: AbortController | null = null;
   let cancelled = false;
   let sink: ((result: AsrResult) => void) | null = null;
 
   const requireRecorder = (): Recorder => {
     if (!recorder) {
-      throw new Error('On-device whisper.cpp ASR needs a recorder to capture from.');
+      throw new Error('Groq Whisper ASR needs a recorder to capture from.');
     }
     return recorder;
   };
 
-  return {
-    start: async (onTranscript): Promise<void> => {
-      cancelled = false;
-      sink = onTranscript;
-      const mic = requireRecorder();
-
-      if (!(await mic.requestPermission())) {
-        const err = new Error('Microphone permission denied.');
-        Sentry.captureException(err, { tags: { reason: 'voice' } });
-        throw err;
-      }
-
-      // Warm the context while the user is still speaking, so the wait after
-      // they stop is inference only, not a 75MB model load as well.
-      void whisperContext().catch((error: unknown) => {
-        Sentry.captureException(error, { tags: { reason: 'voice' } });
-      });
-
-      await mic.start();
-    },
-
-    stop: async (): Promise<string> => {
-      const mic = requireRecorder();
-      const clip = await mic.stop();
-      if (cancelled || !clip) return '';
-
-      try {
-        const context = await whisperContext();
-        // `language: 'en'` because the bundled weights are the English-only
-        // build; asking it to detect would cost time for nothing.
-        const { promise } = context.transcribe(clip, { language: 'en' });
-        const { result } = await promise;
-        const transcript = result.trim();
-        if (transcript) sink?.({ transcript, isPartial: false });
-        return transcript;
-      } catch (error) {
-        Sentry.captureException(error, { tags: { reason: 'voice' } });
-        throw error;
-      }
-    },
-
-    cancel: async (): Promise<void> => {
-      cancelled = true;
-      sink = null;
-      await recorder?.cancel();
-    },
-  };
-}
-
-// ---- Groq Whisper ----
-
-function createGroqProvider(apiKey: string): AsrProvider {
-  let abortController: AbortController | null = null;
-
   const failIfNoKey = (): void => {
     if (!apiKey) {
-      const err = new Error('Groq API key is required for Groq Whisper ASR.');
+      const err = new Error(
+        'Groq API key is required for Groq Whisper ASR. Add it under Settings → Voice.',
+      );
       Sentry.captureException(err, { tags: { reason: 'voice' } });
       throw err;
     }
   };
 
   return {
-    start: async (onT) => {
+    start: async (onTranscript) => {
       failIfNoKey();
+      cancelled = false;
+      sink = onTranscript;
+
+      const mic = requireRecorder();
+      if (!(await mic.requestPermission())) {
+        const err = new Error('Microphone permission denied.');
+        Sentry.captureException(err, { tags: { reason: 'voice' } });
+        throw err;
+      }
+
       abortController = new AbortController();
-      // Real implementation: POST to Groq /openai/v1/audio/transcriptions
+      await mic.start();
     },
+
     stop: async () => {
-      abortController?.abort();
-      abortController = null;
-      return '';
+      const mic = requireRecorder();
+      const clip = await mic.stop();
+      if (cancelled || !clip) return '';
+
+      // React Native's FormData takes a file descriptor rather than a Blob;
+      // the clip never has to be read into JS memory.
+      const form = new FormData();
+      form.append('file', {
+        uri: clip,
+        name: 'speech.m4a',
+        type: 'audio/m4a',
+      } as unknown as Blob);
+      form.append('model', GROQ_MODEL);
+      // The agent is driven in English and the prompt surface is English;
+      // pinning it stops a noisy clip being "detected" as another language.
+      form.append('language', 'en');
+      form.append('response_format', 'json');
+
+      try {
+        const response = await fetch(GROQ_TRANSCRIBE_URL, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          body: form,
+          ...(abortController ? { signal: abortController.signal } : {}),
+        });
+
+        if (!response.ok) {
+          // 401 is a bad key and 429 is the daily cap — both are the user's
+          // to fix, so the status has to survive into the message.
+          const detail = await response.text().catch(() => '');
+          throw new Error(
+            `Groq transcription failed (${response.status}). ${detail}`.trim(),
+          );
+        }
+
+        const body = (await response.json()) as { text?: string };
+        const transcript = (body.text ?? '').trim();
+        if (transcript) sink?.({ transcript, isPartial: false });
+        return transcript;
+      } catch (error) {
+        // An abort is a deliberate cancel, not a failure worth reporting.
+        if (cancelled) return '';
+        Sentry.captureException(error, { tags: { reason: 'voice' } });
+        throw error;
+      } finally {
+        abortController = null;
+      }
     },
+
     cancel: async () => {
+      cancelled = true;
+      sink = null;
       abortController?.abort();
       abortController = null;
+      await recorder?.cancel();
     },
   };
 }

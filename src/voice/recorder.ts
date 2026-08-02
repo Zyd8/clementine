@@ -29,7 +29,7 @@ export type Recorder = {
   level: () => number;
 };
 
-/** whisper.cpp resamples anything else, so hand it what it wants. */
+/** Whisper models expect 16kHz mono; sending it directly avoids a resample. */
 const WHISPER_FORMAT = {
   ...RecordingPresets.HIGH_QUALITY,
   sampleRate: 16_000,

@@ -1,19 +1,5 @@
 import { createAsrProvider, type AsrProvider, type AsrResult } from '@/voice/asr';
 
-// The native module cannot load under Jest; the contract above it is what
-// these tests are about.
-jest.mock('whisper.rn/index', () => ({
-  initWhisper: jest.fn().mockResolvedValue({
-    transcribe: () => ({
-      promise: Promise.resolve({ result: '  hello from the device  ' }),
-    }),
-  }),
-}));
-
-jest.mock('./whisperModel', () => ({
-  ensureModel: jest.fn().mockResolvedValue('file:///model.bin'),
-}));
-
 
 /**
  * A fake ASR provider for testing. Returns pre-scripted transcripts with
@@ -49,8 +35,8 @@ export function createFakeAsrProvider(
 
 describe('ASR provider interface', () => {
   describe('createAsrProvider', () => {
-    it('returns a whisper_cpp provider for free default (no key)', () => {
-      const provider = createAsrProvider({ provider: 'whisper_cpp' });
+    it('returns a groq provider by default', () => {
+      const provider = createAsrProvider({ provider: 'groq', apiKey: 'k' });
       expect(provider).toBeDefined();
       expect(typeof provider.start).toBe('function');
       expect(typeof provider.stop).toBe('function');
@@ -73,99 +59,110 @@ describe('ASR provider interface', () => {
     });
   });
 
-  // ---- whisper_cpp provider methods ----
+  // ---- provider methods ----
 
-  describe('whisper_cpp provider — on-device, no key, no network', () => {
+  // ---- Groq provider methods ----
+
+  describe('Groq Whisper provider — the real transcription path', () => {
     const recorder = () => ({
       requestPermission: jest.fn().mockResolvedValue(true),
       start: jest.fn().mockResolvedValue(undefined),
-      stop: jest.fn().mockResolvedValue('file:///clip.wav'),
+      stop: jest.fn().mockResolvedValue('file:///clip.m4a'),
       cancel: jest.fn().mockResolvedValue(undefined),
       level: jest.fn().mockReturnValue(0),
     });
 
+    const respond = (body: unknown, ok = true, status = 200) => {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok,
+        status,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+      return fetchMock;
+    };
+
+    afterEach(() => jest.restoreAllMocks());
+
     it('asks for the mic and opens it', async () => {
       const mic = recorder();
-      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+      const provider = createAsrProvider({ provider: 'groq', apiKey: 'k' }, mic);
 
       await provider.start(jest.fn());
       expect(mic.requestPermission).toHaveBeenCalled();
       expect(mic.start).toHaveBeenCalled();
     });
 
-    /** Recording into a denied mic yields silence and a baffling empty turn. */
     it('refuses to record when the user denies the mic', async () => {
       const mic = recorder();
       mic.requestPermission.mockResolvedValue(false);
-      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+      const provider = createAsrProvider({ provider: 'groq', apiKey: 'k' }, mic);
 
       await expect(provider.start(jest.fn())).rejects.toThrow(/permission/i);
       expect(mic.start).not.toHaveBeenCalled();
     });
 
-    it('transcribes the clip on device and returns the text', async () => {
+    it('refuses to start without a key, and says where to add one', async () => {
+      const provider = createAsrProvider({ provider: 'groq', apiKey: '' }, recorder());
+      await expect(provider.start(jest.fn())).rejects.toThrow(/Settings/);
+    });
+
+    it('uploads the clip and returns the transcript', async () => {
+      const fetchMock = respond({ text: '  check the api server  ' });
       const mic = recorder();
-      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+      const provider = createAsrProvider({ provider: 'groq', apiKey: 'k' }, mic);
       const onTranscript = jest.fn();
 
       await provider.start(onTranscript);
-      await expect(provider.stop()).resolves.toBe('hello from the device');
+      await expect(provider.stop()).resolves.toBe('check the api server');
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toContain('api.groq.com');
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer k');
       expect(onTranscript).toHaveBeenCalledWith({
-        transcript: 'hello from the device',
+        transcript: 'check the api server',
         isPartial: false,
       });
+    });
+
+    /**
+     * 401 is a bad key and 429 is the daily cap. Both are the user's to fix,
+     * so the status has to survive into the message rather than becoming a
+     * generic failure.
+     */
+    it('reports the status when the request is rejected', async () => {
+      respond({ error: 'invalid_api_key' }, false, 401);
+      const provider = createAsrProvider({ provider: 'groq', apiKey: 'bad' }, recorder());
+
+      await provider.start(jest.fn());
+      await expect(provider.stop()).rejects.toThrow(/401/);
     });
 
     it('yields nothing when the recorder captured no clip', async () => {
       const mic = recorder();
       mic.stop.mockResolvedValue(null);
-      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+      const provider = createAsrProvider({ provider: 'groq', apiKey: 'k' }, mic);
 
       await provider.start(jest.fn());
       await expect(provider.stop()).resolves.toBe('');
     });
 
-    it('discards the recording on cancel and reports no transcript', async () => {
+    it('discards the recording on cancel and uploads nothing', async () => {
+      const fetchMock = respond({ text: 'unused' });
       const mic = recorder();
-      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+      const provider = createAsrProvider({ provider: 'groq', apiKey: 'k' }, mic);
 
       await provider.start(jest.fn());
       await provider.cancel();
       expect(mic.cancel).toHaveBeenCalled();
       await expect(provider.stop()).resolves.toBe('');
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    /** Better a clear error than silently recording into nothing. */
     it('says so when constructed without a recorder', async () => {
-      const provider = createAsrProvider({ provider: 'whisper_cpp' });
+      const provider = createAsrProvider({ provider: 'groq', apiKey: 'k' });
       await expect(provider.start(jest.fn())).rejects.toThrow(/recorder/i);
-    });
-  });
-
-  // ---- Groq provider methods ----
-
-  describe('Groq Whisper provider', () => {
-    it('start with valid key does not throw', async () => {
-      const provider = createAsrProvider({ provider: 'groq', apiKey: 'key1' });
-      const onT = jest.fn();
-      await expect(provider.start(onT)).resolves.toBeUndefined();
-    });
-
-    it('start without apiKey throws', async () => {
-      const provider = createAsrProvider({ provider: 'groq', apiKey: '' });
-      const onT = jest.fn();
-      await expect(provider.start(onT)).rejects.toThrow('Groq API key is required for Groq Whisper ASR.');
-    });
-
-    it('stop does not throw', async () => {
-      const provider = createAsrProvider({ provider: 'groq', apiKey: 'key1' });
-      const result = await provider.stop();
-      expect(result).toBe('');
-    });
-
-    it('cancel does not throw', async () => {
-      const provider = createAsrProvider({ provider: 'groq', apiKey: 'key1' });
-      await expect(provider.cancel()).resolves.toBeUndefined();
     });
   });
 

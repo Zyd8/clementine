@@ -7,10 +7,10 @@ import {
 
 describe('voice types', () => {
   describe('asrProviderSchema', () => {
-    it('accepts whisper_cpp with no key', () => {
-      const result = asrProviderSchema.safeParse({ provider: 'whisper_cpp' });
+    it('accepts groq with no key at the schema level — the provider enforces it', () => {
+      const result = asrProviderSchema.safeParse({ provider: 'groq' });
       expect(result.success).toBe(true);
-      expect(result.data?.provider).toBe('whisper_cpp');
+      expect(result.data?.provider).toBe('groq');
       expect(result.data?.apiKey).toBeUndefined();
     });
 
@@ -87,11 +87,11 @@ describe('voice types', () => {
   });
 
   describe('voiceProfileSchema', () => {
-    it('accepts free defaults (whisper_cpp + edge, no keys)', () => {
+    it('defaults to groq ASR + the device TTS voice', () => {
       const result = voiceProfileSchema.safeParse({});
       expect(result.success).toBe(true);
-      expect(result.data?.asr.provider).toBe('whisper_cpp');
-      expect(result.data?.tts.provider).toBe('edge');
+      expect(result.data?.asr.provider).toBe('groq');
+      expect(result.data?.tts.provider).toBe('device');
     });
 
     it('defaults endOfSpeechTimeoutMs to 900', () => {
@@ -135,9 +135,9 @@ describe('voice types', () => {
   });
 
   describe('VOICE_PROFILE_DEFAULTS', () => {
-    it('is free-first: whisper_cpp + edge', () => {
-      expect(VOICE_PROFILE_DEFAULTS.asr.provider).toBe('whisper_cpp');
-      expect(VOICE_PROFILE_DEFAULTS.tts.provider).toBe('edge');
+    it('is free-first: groq ASR + the device voice', () => {
+      expect(VOICE_PROFILE_DEFAULTS.asr.provider).toBe('groq');
+      expect(VOICE_PROFILE_DEFAULTS.tts.provider).toBe('device');
     });
   });
 });

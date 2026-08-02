@@ -38,10 +38,11 @@ jest.mock('expo-audio', () => ({
   }),
 }));
 
-// whisper.rn's native binding likewise; asr.ts's contract is tested with its
-// own local mock where the transcript matters.
-jest.mock('whisper.rn/index', () => ({
-  initWhisper: jest.fn(async () => ({
-    transcribe: () => ({ promise: Promise.resolve({ result: '' }) }),
-  })),
+// expo-speech drives the platform engine; under Jest it only has to be
+// importable and to run its completion callbacks.
+jest.mock('expo-speech', () => ({
+  speak: jest.fn((_text: string, options?: { onDone?: () => void }) => {
+    options?.onDone?.();
+  }),
+  stop: jest.fn(async () => undefined),
 }));

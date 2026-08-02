@@ -18,13 +18,13 @@ import type { AsrProviderConfig, TtsProviderConfig } from '@/types/voice';
 const THEME_OPTIONS: readonly ThemePreference[] = ['system', 'light', 'dark'];
 
 const ASR_OPTIONS: readonly { value: AsrProviderConfig['provider']; label: string }[] = [
-  { value: 'whisper_cpp', label: 'On-device whisper.cpp (free)' },
-  { value: 'groq', label: 'Groq Whisper' },
+  { value: 'groq', label: 'Groq Whisper (free tier)' },
   { value: 'deepgram', label: 'Deepgram streaming' },
   { value: 'openai', label: 'OpenAI Whisper' },
 ];
 
 const TTS_OPTIONS: readonly { value: TtsProviderConfig['provider']; label: string }[] = [
+  { value: 'device', label: 'On-device voice (free, offline)' },
   { value: 'edge', label: 'Edge TTS (free)' },
   { value: 'elevenlabs', label: 'ElevenLabs' },
   { value: 'openai', label: 'OpenAI' },

@@ -70,7 +70,7 @@ describe('SettingsScreen', () => {
 
   it('offers the design’s speech-to-text providers and selects one', async () => {
     await render(<SettingsScreen />);
-    expect(screen.getByText('On-device whisper.cpp (free)')).toBeTruthy();
+    expect(screen.getByText('Groq Whisper (free tier)')).toBeTruthy();
 
     fireEvent.press(screen.getByTestId('option-asr-groq'));
     await waitFor(() =>

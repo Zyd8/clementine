@@ -54,7 +54,7 @@ export type KeyboardProbe = {
  * constant clearance guarantees the input sits fully clear without the
  * over-lift that a large buffer would cause.
  */
-export const KEYBOARD_CLEARANCE = 12;
+export const KEYBOARD_CLEARANCE = 67;
 
 export function useKeyboardOverlap(
   ref: RefObject<Measurable | null>,

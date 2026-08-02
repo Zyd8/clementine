@@ -6,14 +6,16 @@ import { z } from 'zod';
  * Voice keys are the USER's; the connection (and its profiles) are the AGENT's.
  * Two separate stores, per ARCHITECTURE.md.
  *
- * Free-first defaults: on-device whisper.cpp ASR + Edge TTS = working voice
- * with zero keys. BYO providers are the upgrade path.
+ * Free-first defaults: Groq Whisper ASR on its free tier + the platform's own
+ * TTS voice. Transcription needs a key; speech does not. On-device Whisper
+ * was removed — it required a third-party native module and a 75MB model
+ * download for every install.
  */
 
 // ---- ASR provider config ----
 
 export const asrProviderSchema = z.object({
-  provider: z.enum(['whisper_cpp', 'groq', 'deepgram', 'openai']),
+  provider: z.enum(['groq', 'deepgram', 'openai']),
   apiKey: z.string().optional(),
 });
 
@@ -22,7 +24,11 @@ export type AsrProviderConfig = z.infer<typeof asrProviderSchema>;
 // ---- TTS provider config ----
 
 export const ttsProviderSchema = z.object({
-  provider: z.enum(['edge', 'elevenlabs', 'openai', 'minimax']),
+  // `device` is the platform's built-in speech engine: free, offline, no key.
+  // It is the default because Edge TTS is an unofficial endpoint that now
+  // requires rotating DRM tokens and breaks without notice — not something to
+  // put in front of every reply.
+  provider: z.enum(['device', 'edge', 'elevenlabs', 'openai', 'minimax']),
   apiKey: z.string().optional(),
   voiceId: z.string().optional(),
 });
@@ -36,8 +42,8 @@ export type InterruptBehavior = 'stop_speech_only' | 'stop_speech_and_run';
 // ---- Full voice profile ----
 
 export const voiceProfileSchema = z.object({
-  asr: asrProviderSchema.default({ provider: 'whisper_cpp' }),
-  tts: ttsProviderSchema.default({ provider: 'edge' }),
+  asr: asrProviderSchema.default({ provider: 'groq' }),
+  tts: ttsProviderSchema.default({ provider: 'device' }),
   interruptBehavior: z
     .enum(['stop_speech_only', 'stop_speech_and_run'])
     .default('stop_speech_and_run'),

@@ -58,8 +58,15 @@ beforeEach(() => {
     hydrated: true,
   });
   useChatStore.setState({ byProfile: {} });
-  // Reset voice profile to defaults (edge TTS, whisper_cpp ASR)
-  useVoiceProfileStore.setState({ profile: { ...VOICE_PROFILE_DEFAULTS }, hydrated: true });
+  // Reset voice profile to defaults (device TTS, Groq ASR)
+  // Groq is the default ASR now and refuses to open the mic without a key.
+  useVoiceProfileStore.setState({
+    profile: {
+      ...VOICE_PROFILE_DEFAULTS,
+      asr: { provider: 'groq', apiKey: 'test-key' },
+    },
+    hydrated: true,
+  });
   mockedCreateRun.mockResolvedValue({ runId: 'run_abc', status: 'started' });
   mockedStream.mockReturnValue(streamOf([]));
   ttsCallbacks.current = null;
@@ -198,7 +205,7 @@ describe('useVoiceChat', () => {
       // Set voice profile to stop_speech_and_run before rendering
       useVoiceProfileStore.setState({
         profile: {
-          asr: { provider: 'whisper_cpp' as const },
+          asr: { provider: 'groq' as const, apiKey: 'test-key' },
           tts: { provider: 'edge' as const },
           interruptBehavior: 'stop_speech_and_run' as const,
           endOfSpeechTimeoutMs: 900,

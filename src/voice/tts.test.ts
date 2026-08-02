@@ -1,4 +1,5 @@
 import { createTtsProvider, type TtsCallbacks, type TtsProvider } from '@/voice/tts';
+import * as Speech from 'expo-speech';
 
 /**
  * A fake TTS provider for testing. Queues sentences and delivers callbacks
@@ -313,5 +314,87 @@ describe('TTS provider interface', () => {
       // Empty text should still complete normally (no-op)
       expect(callbacks.onError).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('device TTS — the free, offline default', () => {
+  const callbacks = () => ({
+    onSentenceEnd: jest.fn(),
+    onAllDone: jest.fn(),
+    onError: jest.fn(),
+  });
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('speaks through the platform engine', async () => {
+    const cb = callbacks();
+    const tts = createTtsProvider({ provider: 'device' }, cb);
+
+    await tts.speak('hello there');
+    expect(Speech.speak).toHaveBeenCalledWith('hello there', expect.anything());
+    expect(cb.onSentenceEnd).toHaveBeenCalled();
+  });
+
+  it('ignores an empty sentence rather than queueing silence', async () => {
+    const cb = callbacks();
+    const tts = createTtsProvider({ provider: 'device' }, cb);
+
+    await tts.speak('   ');
+    expect(Speech.speak).not.toHaveBeenCalled();
+    expect(cb.onSentenceEnd).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Sentences arrive from the stream faster than they are spoken. Firing
+   * onAllDone on the first completion would end the turn mid-reply.
+   */
+  it('reports all-done only once the queue drains', async () => {
+    const cb = callbacks();
+    let finish: (() => void)[] = [];
+    (Speech.speak as jest.Mock).mockImplementation(
+      (_t: string, o: { onDone?: () => void }) => {
+        if (o.onDone) finish.push(o.onDone);
+      },
+    );
+
+    const tts = createTtsProvider({ provider: 'device' }, cb);
+    await tts.speak('first.');
+    await tts.speak('second.');
+
+    finish[0]?.();
+    expect(cb.onAllDone).not.toHaveBeenCalled();
+
+    finish[1]?.();
+    expect(cb.onAllDone).toHaveBeenCalledTimes(1);
+    finish = [];
+  });
+
+  it('stops playback and stays quiet about finishing', async () => {
+    const cb = callbacks();
+    (Speech.speak as jest.Mock).mockImplementation(() => undefined);
+    const tts = createTtsProvider({ provider: 'device' }, cb);
+
+    await tts.speak('a long reply.');
+    expect(tts.isPlaying()).toBe(true);
+
+    await tts.stop();
+    expect(Speech.stop).toHaveBeenCalled();
+    expect(tts.isPlaying()).toBe(false);
+    expect(cb.onAllDone).not.toHaveBeenCalled();
+  });
+
+  it('surfaces an engine failure instead of dropping the turn', async () => {
+    const cb = callbacks();
+    (Speech.speak as jest.Mock).mockImplementation(
+      (_t: string, o: { onError?: (e: Error) => void }) => {
+        o.onError?.(new Error('engine unavailable'));
+      },
+    );
+
+    const tts = createTtsProvider({ provider: 'device' }, cb);
+    await tts.speak('hello');
+    expect(cb.onError).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'engine unavailable',
+    }));
   });
 });

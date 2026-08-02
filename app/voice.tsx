@@ -7,6 +7,7 @@ import { VoiceWaveform } from '@/components/features/VoiceWaveform';
 import { useTheme } from '@/hooks/useTheme';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useProfilesStore } from '@/stores/profiles';
+import { useVoiceProfileStore } from '@/stores/voiceProfile';
 import type { VoiceChatState } from '@/types/voice';
 
 /**
@@ -39,11 +40,17 @@ export default function VoiceScreen() {
   const profileId = useProfilesStore((s) => s.activeProfileId)();
   const { voiceState, liveTranscript, audioLevel, tapMic } = useVoiceChat(profileId);
 
+  // Transcription is a cloud call now, so voice mode cannot start without a
+  // key. Opening the mic anyway would record a clip, upload it, and fail —
+  // better to say what is missing before anyone speaks into nothing.
+  const asr = useVoiceProfileStore((s) => s.profile.asr);
+  const needsKey = !asr.apiKey;
+
   // The user tapped a mic to get here; opening the screen *is* the tap.
   useEffect(() => {
-    if (voiceState === 'IDLE') void tapMic();
-    // Intentionally mount-only: re-running on every state change would
-    // re-arm the mic the moment a turn finishes and IDLE comes back around.
+    if (!needsKey && voiceState === 'IDLE') void tapMic();
+    // Mount-only: re-running on every state change would re-arm the mic the
+    // moment a turn finishes and IDLE comes back around.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -110,14 +117,14 @@ export default function VoiceScreen() {
         <Text
           accessibilityLiveRegion="polite"
           style={{
-            color: accent,
+            color: needsKey ? theme.colors.err : accent,
             fontFamily: theme.fonts.regular,
             fontSize: theme.type(11),
             letterSpacing: 1.3,
             textTransform: 'uppercase',
           }}
         >
-          {LABELS[voiceState]}
+          {needsKey ? 'voice needs a key' : LABELS[voiceState]}
         </Text>
 
         <View
@@ -144,6 +151,7 @@ export default function VoiceScreen() {
         </View>
 
         <Text
+          testID="voice-transcript"
           style={{
             color: theme.colors.ink,
             fontFamily: theme.fonts.regular,
@@ -154,7 +162,9 @@ export default function VoiceScreen() {
             textAlign: 'center',
           }}
         >
-          {liveTranscript}
+          {needsKey
+            ? `Speech-to-text runs through ${asr.provider}, which needs an API key. Add one under Settings → Voice.`
+            : liveTranscript}
         </Text>
 
         <Text

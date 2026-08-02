@@ -15,13 +15,9 @@ import { useTheme } from '@/hooks/useTheme';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
 import type { AsrProviderConfig, TtsProviderConfig } from '@/types/voice';
 
-const ASR_PROVIDERS: AsrProviderConfig['provider'][] = [
-  'whisper_cpp',
-  'groq',
-  'deepgram',
-  'openai',
-];
+const ASR_PROVIDERS: AsrProviderConfig['provider'][] = ['groq', 'deepgram', 'openai'];
 const TTS_PROVIDERS: TtsProviderConfig['provider'][] = [
+  'device',
   'edge',
   'elevenlabs',
   'openai',
@@ -205,8 +201,8 @@ export default function VoiceProfileScreen() {
         ))}
       </View>
 
-      {/* BYO ASR key — not needed for whisper_cpp */}
-      {profile.asr.provider !== 'whisper_cpp' && (
+      {/* Every ASR provider is a cloud service now, so all of them need a key. */}
+      {(
         <Field
           label="ASR API Key"
           value={asrKey}

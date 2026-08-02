@@ -17,7 +17,7 @@ beforeEach(() => {
   useSettingsStore.setState({ theme: 'dark' });
   useVoiceProfileStore.setState({
     profile: {
-      asr: { provider: 'whisper_cpp' },
+      asr: { provider: 'groq' },
       tts: { provider: 'edge' },
       interruptBehavior: 'stop_speech_and_run',
       endOfSpeechTimeoutMs: 900,
@@ -47,7 +47,7 @@ describe('VoiceProfileScreen', () => {
 
   it('renders ASR provider options', async () => {
     await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
-    expect(screen.getByText('whisper cpp')).toBeTruthy();
+    expect(screen.getByText('groq')).toBeTruthy();
     expect(screen.getByText('groq')).toBeTruthy();
     expect(screen.getByText('deepgram')).toBeTruthy();
     // 'openai' appears in both ASR and TTS lists — use getAllByText
@@ -62,15 +62,16 @@ describe('VoiceProfileScreen', () => {
     expect(screen.getByText('minimax')).toBeTruthy();
   });
 
-  it('does not show ASR API key field for whisper_cpp (free default)', async () => {
+  /** Every ASR provider is a cloud service now, so all of them need a key. */
+  it('shows the ASR API key field for groq', async () => {
     useVoiceProfileStore.setState({
       profile: {
         ...useVoiceProfileStore.getState().profile,
-        asr: { provider: 'whisper_cpp' },
+        asr: { provider: 'groq' },
       },
     });
     await render(<SafeAreaProvider initialMetrics={METRICS}><VoiceProfileScreen /></SafeAreaProvider>);
-    expect(screen.queryByText('ASR API Key')).toBeNull();
+    expect(screen.getByText('ASR API Key')).toBeTruthy();
   });
 
   it('shows ASR API key field for groq (BYO key required)', async () => {

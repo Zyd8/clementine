@@ -6,7 +6,7 @@ import { type VoiceProfile } from '@/types/voice';
 import { useVoiceProfileStore, VOICE_PROFILE_STORAGE_KEY } from './voiceProfile';
 
 const FULL_PROFILE: VoiceProfile = {
-  asr: { provider: 'whisper_cpp' },
+  asr: { provider: 'groq' },
   tts: { provider: 'edge' },
   interruptBehavior: 'stop_speech_and_run',
   endOfSpeechTimeoutMs: 900,
@@ -16,8 +16,8 @@ const FULL_PROFILE: VoiceProfile = {
 const reset = () =>
   useVoiceProfileStore.setState({
     profile: {
-      asr: { provider: 'whisper_cpp' },
-      tts: { provider: 'edge' },
+      asr: { provider: 'groq' },
+      tts: { provider: 'device' as const },
       interruptBehavior: 'stop_speech_and_run',
       endOfSpeechTimeoutMs: 900,
       maxRecordingMs: 60_000,
@@ -32,17 +32,17 @@ describe('voice profile store', () => {
     jest.clearAllMocks();
   });
 
-  it('starts with free defaults (whisper_cpp + edge)', () => {
-    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('whisper_cpp');
-    expect(useVoiceProfileStore.getState().ttsConfig().provider).toBe('edge');
+  it('starts with free defaults (groq + device voice)', () => {
+    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('groq');
+    expect(useVoiceProfileStore.getState().ttsConfig().provider).toBe('device');
   });
 
   it('stores a voice profile, not a list', async () => {
     await useVoiceProfileStore.getState().setProfile(FULL_PROFILE);
     expect(Array.isArray(useVoiceProfileStore.getState().profile)).toBe(false);
     expect(useVoiceProfileStore.getState().profile).toMatchObject({
-      asr: { provider: 'whisper_cpp' },
-      tts: { provider: 'edge' },
+      asr: { provider: 'groq' },
+      tts: { provider: 'edge' as const },
     });
   });
 
@@ -50,7 +50,7 @@ describe('voice profile store', () => {
     await useVoiceProfileStore.getState().setProfile(FULL_PROFILE);
     expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
       VOICE_PROFILE_STORAGE_KEY,
-      expect.stringContaining('whisper_cpp'),
+      expect.stringContaining('groq'),
     );
     expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   });
@@ -74,8 +74,8 @@ describe('voice profile store', () => {
   it('hydrates to free defaults when nothing is stored', async () => {
     await useVoiceProfileStore.getState().hydrate();
 
-    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('whisper_cpp');
-    expect(useVoiceProfileStore.getState().ttsConfig().provider).toBe('edge');
+    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('groq');
+    expect(useVoiceProfileStore.getState().ttsConfig().provider).toBe('device');
     expect(useVoiceProfileStore.getState().hydrated).toBe(true);
   });
 
@@ -83,7 +83,7 @@ describe('voice profile store', () => {
     await SecureStore.setItemAsync(VOICE_PROFILE_STORAGE_KEY, '{not valid');
     await useVoiceProfileStore.getState().hydrate();
 
-    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('whisper_cpp');
+    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('groq');
     expect(useVoiceProfileStore.getState().hydrated).toBe(true);
   });
 
@@ -94,7 +94,7 @@ describe('voice profile store', () => {
     );
     await useVoiceProfileStore.getState().hydrate();
 
-    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('whisper_cpp');
+    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('groq');
   });
 
   it('updates ASR config independently of TTS config', async () => {
@@ -106,6 +106,7 @@ describe('voice profile store', () => {
     });
 
     expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('groq');
+    // The point of the test: changing ASR leaves the stored TTS choice alone.
     expect(useVoiceProfileStore.getState().ttsConfig().provider).toBe('edge');
   });
 
@@ -119,7 +120,7 @@ describe('voice profile store', () => {
     });
 
     expect(useVoiceProfileStore.getState().ttsConfig().provider).toBe('elevenlabs');
-    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('whisper_cpp');
+    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('groq');
   });
 
   it('reset clears to free defaults', async () => {
@@ -129,8 +130,8 @@ describe('voice profile store', () => {
     });
     await useVoiceProfileStore.getState().reset();
 
-    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('whisper_cpp');
-    expect(useVoiceProfileStore.getState().ttsConfig().provider).toBe('edge');
+    expect(useVoiceProfileStore.getState().asrConfig().provider).toBe('groq');
+    expect(useVoiceProfileStore.getState().ttsConfig().provider).toBe('device');
   });
 
   it('reset wipes the stored profile from SecureStore', async () => {
