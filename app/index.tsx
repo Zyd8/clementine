@@ -115,6 +115,17 @@ export default function ChatScreen() {
             SESSIONS
           </Text>
         </Pressable>
+        <Pressable onPress={() => router.push('/voice-profile')}>
+          <Text
+            style={{
+              color: theme.colors.gold,
+              fontFamily: theme.typography.mono.fontFamily,
+              fontSize: theme.typography.mono.fontSize,
+            }}
+          >
+            VOICE
+          </Text>
+        </Pressable>
         <Pressable onPress={() => router.push('/setup')}>
           <Text
             style={{
