@@ -4,7 +4,9 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 
 import { useTheme } from '@/hooks/useTheme';
+import { useBudgetStore } from '@/stores/budget';
 import { useConnectionStore } from '@/stores/connection';
+import { useProfilesStore } from '@/stores/profiles';
 import { useSettingsStore } from '@/stores/settings';
 import { redirectTarget } from '@/utils/routeGuard';
 import { initTelemetry } from '@/utils/telemetry';
@@ -27,13 +29,19 @@ export default function RootLayout() {
 
   const hydrateSettings = useSettingsStore((s) => s.hydrate);
   const hydrateConnection = useConnectionStore((s) => s.hydrate);
+  const hydrateProfiles = useProfilesStore((s) => s.hydrate);
+  const hydrateBudget = useBudgetStore((s) => s.hydrate);
   const hydrated = useConnectionStore((s) => s.hydrated);
   const connection = useConnectionStore((s) => s.connection);
 
   useEffect(() => {
     void hydrateSettings();
     void hydrateConnection();
-  }, [hydrateSettings, hydrateConnection]);
+    // Profiles and budget are display state — the gate below waits only on the
+    // connection, so a slow read here never holds up first paint.
+    void hydrateProfiles();
+    void hydrateBudget();
+  }, [hydrateSettings, hydrateConnection, hydrateProfiles, hydrateBudget]);
 
   // First launch with no stored connection lands on setup automatically.
   //

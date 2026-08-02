@@ -1,8 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
 
 import { darkTheme } from '@/constants/theme';
+import { useBudgetStore, DEFAULT_DAILY_LIMIT } from '@/stores/budget';
 import { useSettingsStore } from '@/stores/settings';
+import { useVoiceProfileStore } from '@/stores/voiceProfile';
+import { VOICE_PROFILE_DEFAULTS } from '@/types/voice';
 
 import SettingsScreen from '../../app/(tabs)/settings';
 
@@ -18,7 +21,14 @@ const flatten = (style: unknown): Record<string, unknown> =>
   Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
 
 describe('SettingsScreen', () => {
-  beforeEach(() => useSettingsStore.setState({ theme: 'dark', hydrated: true }));
+  beforeEach(() => {
+    useSettingsStore.setState({ theme: 'dark', hydrated: true });
+    useBudgetStore.setState({ dailyLimit: DEFAULT_DAILY_LIMIT, hydrated: true });
+    useVoiceProfileStore.setState({
+      profile: { ...VOICE_PROFILE_DEFAULTS },
+      hydrated: true,
+    });
+  });
 
   /**
    * The chat header used to carry a one-label cycling toggle. The design
@@ -32,13 +42,13 @@ describe('SettingsScreen', () => {
     }
   });
 
-  it('marks the current preference gold and the rest steel', async () => {
+  it('fills the current preference gold and leaves the rest raised', async () => {
     await render(<SettingsScreen />);
-    expect(flatten(screen.getByTestId('theme-dark').props.style).borderColor).toBe(
+    expect(flatten(screen.getByTestId('theme-dark').props.style).backgroundColor).toBe(
       darkTheme.colors.gold,
     );
-    expect(flatten(screen.getByTestId('theme-light').props.style).borderColor).toBe(
-      darkTheme.colors.steel,
+    expect(flatten(screen.getByTestId('theme-light').props.style).backgroundColor).toBe(
+      darkTheme.colors.canvasRaised,
     );
   });
 
@@ -58,17 +68,34 @@ describe('SettingsScreen', () => {
     );
   });
 
-  it('routes to the voice providers and connection screens', async () => {
-    const { router } = jest.requireMock('expo-router') as {
-      router: { push: jest.Mock };
-    };
-    router.push.mockClear();
-
+  it('offers the design’s speech-to-text providers and selects one', async () => {
     await render(<SettingsScreen />);
-    fireEvent.press(screen.getByText(/providers/));
-    expect(router.push).toHaveBeenCalledWith('/voice-profile');
+    expect(screen.getByText('On-device whisper.cpp (free)')).toBeTruthy();
 
-    fireEvent.press(screen.getByText(/reconfigure/));
-    expect(router.push).toHaveBeenCalledWith('/setup');
+    fireEvent.press(screen.getByTestId('option-asr-groq'));
+    await waitFor(() =>
+      expect(useVoiceProfileStore.getState().profile.asr.provider).toBe('groq'),
+    );
+  });
+
+  it('offers the design’s text-to-speech providers and selects one', async () => {
+    await render(<SettingsScreen />);
+    expect(screen.getByText('Edge TTS (free)')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('option-tts-elevenlabs'));
+    await waitFor(() =>
+      expect(useVoiceProfileStore.getState().profile.tts.provider).toBe('elevenlabs'),
+    );
+  });
+
+  it('edits the daily token budget, digits only', async () => {
+    await render(<SettingsScreen />);
+    fireEvent.changeText(screen.getByLabelText('Daily token budget'), '20o000');
+    await waitFor(() => expect(useBudgetStore.getState().dailyLimit).toBe(20_000));
+  });
+
+  it('says the budget cannot actually stop the server', async () => {
+    await render(<SettingsScreen />);
+    expect(screen.getByText(/non-blocking warning only/)).toBeTruthy();
   });
 });

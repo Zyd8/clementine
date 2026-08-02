@@ -2,8 +2,11 @@ import { router } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
 
 import { SessionRow } from '@/components/features/SessionRow';
+import { Avatar } from '@/components/ui/Avatar';
 import { useSessions } from '@/hooks/useSessions';
 import { useTheme } from '@/hooks/useTheme';
+import { useConnectionStore } from '@/stores/connection';
+import { useProfilesStore } from '@/stores/profiles';
 
 /**
  * Session list for the current connection/profile. Tap a row to resume it
@@ -16,6 +19,11 @@ export default function SessionsScreen() {
   const { sessions, isLoading, error, resumingSessionId, resume, fork, refresh, startNew } =
     useSessions();
 
+  const connection = useConnectionStore((s) => s.connection);
+  const profiles = useProfilesStore((s) => s.profiles);
+  const activeId = useProfilesStore((s) => s.activeId);
+  const activeProfile = profiles.find((p) => p.id === activeId);
+
   const onTap = (sessionId: string) => {
     void resume(sessionId).then(() => router.push('/'));
   };
@@ -26,28 +34,78 @@ export default function SessionsScreen() {
 
   return (
     <View style={{ backgroundColor: theme.colors.canvas, flex: 1 }}>
-      {/* Header with NEW SESSION button */}
+      {/* Title + active profile above, endpoint and NEW SESSION below —
+          the design's sessions header, which the tab bar now leaves room for. */}
       <View
         style={{
           borderBottomColor: theme.colors.steel,
           borderBottomWidth: 1,
-          flexDirection: 'row',
-          justifyContent: 'flex-end',
-          padding: theme.spacing.md,
+          gap: theme.spacing.xs,
+          paddingHorizontal: theme.spacing.md,
+          paddingVertical: 14,
         }}
       >
-        <Pressable onPress={onNewSession}>
+        <View
+          style={{
+            alignItems: 'center',
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+          }}
+        >
           <Text
             style={{
-              color: theme.colors.gold,
-              fontFamily: theme.typography.mono.fontFamily,
-              fontSize: theme.typography.mono.fontSize,
-              fontWeight: '700',
+              color: theme.colors.ink,
+              fontFamily: theme.fonts.semibold,
+              fontSize: 13,
+              letterSpacing: 0.5,
             }}
           >
-            NEW SESSION
+            SESSIONS
           </Text>
-        </Pressable>
+          <View style={{ alignItems: 'center', flexDirection: 'row', gap: 7 }}>
+            <Avatar initials={activeProfile?.avatar ?? 'DF'} size={22} />
+            <Text
+              style={{
+                color: theme.colors.ink,
+                fontFamily: theme.fonts.semibold,
+                fontSize: 11.5,
+              }}
+            >
+              {activeProfile?.name ?? 'default'}
+            </Text>
+          </View>
+        </View>
+        <View
+          style={{
+            alignItems: 'center',
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Text
+            numberOfLines={1}
+            style={{
+              color: theme.colors.inkMuted,
+              flex: 1,
+              fontFamily: theme.fonts.regular,
+              fontSize: 11,
+            }}
+          >
+            {connection?.name ?? 'no hermes connected'}
+          </Text>
+          <Pressable onPress={onNewSession}>
+            <Text
+              style={{
+                color: theme.colors.gold,
+                fontFamily: theme.fonts.bold,
+                fontSize: 11,
+                letterSpacing: 0.4,
+              }}
+            >
+              NEW SESSION
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       {error ? (

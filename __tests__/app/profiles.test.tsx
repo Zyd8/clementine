@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
 
 import { useConnectionStore } from '@/stores/connection';
+import { useProfilesStore } from '@/stores/profiles';
 import { useSettingsStore } from '@/stores/settings';
 
 import ProfilesScreen from '../../app/(tabs)/profiles';
@@ -17,6 +18,11 @@ jest.mock('expo-router', () => ({
 describe('ProfilesScreen', () => {
   beforeEach(() => {
     useSettingsStore.setState({ theme: 'dark', hydrated: true });
+    useProfilesStore.setState({
+      profiles: [{ id: 'default', name: 'default', avatar: 'DF' }],
+      activeId: 'default',
+      hydrated: true,
+    });
     useConnectionStore.setState({
       connection: {
         name: 'Hermes Laptop',
@@ -33,19 +39,44 @@ describe('ProfilesScreen', () => {
     expect(screen.getByText(/Hermes Laptop/)).toBeTruthy();
   });
 
-  it('shows the one profile the host actually runs, marked active', async () => {
+  it('shows the default profile, marked active', async () => {
     await render(<ProfilesScreen />);
-    expect(screen.getByText('default')).toBeTruthy();
+    expect(screen.getByLabelText('Name for default').props.value).toBe('default');
     expect(screen.getByText('ACTIVE')).toBeTruthy();
   });
 
-  /**
-   * Rather than rendering a switcher that switches to nothing: the backend
-   * was verified single-profile on 2026-08-02 and Phase 3 is parked.
-   */
-  it('explains why there is only one profile', async () => {
+  /** The design's rows are editable in place — name and two-letter avatar. */
+  it('renames a profile in place', async () => {
     await render(<ProfilesScreen />);
-    expect(screen.getByText(/single profile/)).toBeTruthy();
+    fireEvent.changeText(screen.getByLabelText('Name for default'), 'personal');
+    expect(useProfilesStore.getState().profiles[0]?.name).toBe('personal');
+  });
+
+  it('edits the avatar, capped at two uppercase characters', async () => {
+    await render(<ProfilesScreen />);
+    fireEvent.changeText(screen.getByLabelText('Avatar for default'), 'pr');
+    expect(useProfilesStore.getState().profiles[0]?.avatar).toBe('PR');
+  });
+
+  it('adds a profile and switches to it', async () => {
+    await render(<ProfilesScreen />);
+    fireEvent.press(screen.getByLabelText('Add profile'));
+    await waitFor(() => expect(useProfilesStore.getState().profiles).toHaveLength(2));
+
+    const added = useProfilesStore.getState().profiles[1]!;
+    fireEvent.press(screen.getByLabelText(`Switch to ${added.name}`));
+    await waitFor(() =>
+      expect(useProfilesStore.getState().activeId).toBe(added.id),
+    );
+  });
+
+  /**
+   * The server runs one profile — switching partitions local state only, and
+   * the screen has to say so rather than implying a server-side switch.
+   */
+  it('explains that switching is local', async () => {
+    await render(<ProfilesScreen />);
+    expect(screen.getByText(/single profile server-side/)).toBeTruthy();
   });
 
   it('disconnects the instance on request', async () => {

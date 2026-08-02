@@ -1,27 +1,32 @@
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
+import { Avatar } from '@/components/ui/Avatar';
 import { useTheme } from '@/hooks/useTheme';
 import { useConnectionStore } from '@/stores/connection';
+import { useProfilesStore } from '@/stores/profiles';
 
 /**
- * Profiles — accounts within the one connected Hermes instance.
+ * Profiles — the switchable unit within the one connected Hermes instance.
  *
- * The design draws editable avatar/name rows and a SELECT control per
- * profile. Only the default profile exists today: `plan/03-profiles.md`
- * records profile switching as parked after the backend was verified on
- * 2026-08-02 (`/v1/profiles` → 404, no `profiles` capability flag), because
- * the host runs a single profile. So the list renders the one real profile
- * and says why there is only one, rather than showing controls that would
- * switch to nothing.
- *
- * DISCONNECT is live — it is the design's footer action and the connection
- * store already implements it.
+ * These are local labels. The host was verified single-profile on 2026-08-02
+ * (`/v1/profiles` → 404), so switching does not change which server you talk
+ * to; it repartitions the local feed and token totals, which the chat and
+ * usage stores already key by `profileId`. That is genuinely useful — one
+ * scrollback for personal work, another for a job — and it is honest about
+ * what it does.
  */
 export default function ProfilesScreen() {
   const theme = useTheme();
   const connection = useConnectionStore((s) => s.connection);
   const disconnect = useConnectionStore((s) => s.disconnect);
+
+  const profiles = useProfilesStore((s) => s.profiles);
+  const activeId = useProfilesStore((s) => s.activeId);
+  const rename = useProfilesStore((s) => s.rename);
+  const setAvatar = useProfilesStore((s) => s.setAvatar);
+  const select = useProfilesStore((s) => s.select);
+  const add = useProfilesStore((s) => s.add);
 
   return (
     <View style={{ backgroundColor: theme.colors.canvas, flex: 1 }}>
@@ -59,13 +64,109 @@ export default function ProfilesScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ gap: 10, padding: theme.spacing.md }}>
-        <View
-          testID="profile-row"
+        <Text
+          style={{
+            color: theme.colors.inkMuted,
+            fontFamily: theme.fonts.regular,
+            fontSize: 10,
+            letterSpacing: 0.6,
+            paddingHorizontal: 2,
+          }}
+        >
+          TAP AVATAR OR NAME TO EDIT · SELECT TO SWITCH
+        </Text>
+
+        {profiles.map((profile) => {
+          const active = profile.id === activeId;
+          return (
+            <View
+              key={profile.id}
+              testID={`profile-${profile.id}`}
+              style={{
+                alignItems: 'center',
+                backgroundColor: theme.colors.canvasRaised,
+                borderColor: active ? theme.colors.gold : theme.colors.steel,
+                borderRadius: theme.radius.md,
+                borderWidth: 1,
+                flexDirection: 'row',
+                gap: 10,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+              }}
+            >
+              <TextInput
+                aria-label={`Avatar for ${profile.name}`}
+                value={profile.avatar}
+                onChangeText={(text) => void setAvatar(profile.id, text)}
+                maxLength={2}
+                autoCapitalize="characters"
+                style={{
+                  backgroundColor: theme.colors.canvas,
+                  borderColor: active ? theme.colors.gold : theme.colors.steel,
+                  borderRadius: theme.radius.full,
+                  borderWidth: 1,
+                  color: active ? theme.colors.gold : theme.colors.inkMuted,
+                  fontFamily: theme.fonts.bold,
+                  fontSize: 11,
+                  height: 34,
+                  textAlign: 'center',
+                  width: 34,
+                }}
+              />
+              <TextInput
+                aria-label={`Name for ${profile.name}`}
+                value={profile.name}
+                onChangeText={(text) => void rename(profile.id, text)}
+                style={{
+                  borderBottomColor: theme.colors.steel,
+                  borderBottomWidth: 1,
+                  color: theme.colors.ink,
+                  flex: 1,
+                  fontFamily: theme.fonts.regular,
+                  fontSize: 13,
+                  minWidth: 0,
+                  paddingHorizontal: 2,
+                  paddingVertical: 4,
+                }}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={active ? `${profile.name} active` : `Switch to ${profile.name}`}
+                onPress={() => void select(profile.id)}
+                style={{
+                  backgroundColor: active ? theme.colors.gold : 'transparent',
+                  borderColor: active ? theme.colors.gold : theme.colors.steel,
+                  borderRadius: theme.radius.sm,
+                  borderWidth: 1,
+                  flexShrink: 0,
+                  paddingHorizontal: 9,
+                  paddingVertical: 6,
+                }}
+              >
+                <Text
+                  style={{
+                    color: active ? theme.colors.canvas : theme.colors.inkMuted,
+                    fontFamily: theme.fonts.bold,
+                    fontSize: 10,
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  {active ? 'ACTIVE' : 'SELECT'}
+                </Text>
+              </Pressable>
+            </View>
+          );
+        })}
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add profile"
+          onPress={() => void add('new profile')}
           style={{
             alignItems: 'center',
-            backgroundColor: theme.colors.canvasRaised,
-            borderColor: theme.colors.gold,
+            borderColor: theme.colors.steel,
             borderRadius: theme.radius.md,
+            borderStyle: 'dashed',
             borderWidth: 1,
             flexDirection: 'row',
             gap: 10,
@@ -73,49 +174,17 @@ export default function ProfilesScreen() {
             paddingVertical: 10,
           }}
         >
-          <View
-            style={{
-              alignItems: 'center',
-              backgroundColor: theme.colors.canvas,
-              borderColor: theme.colors.gold,
-              borderRadius: theme.radius.full,
-              borderWidth: 1,
-              height: 34,
-              justifyContent: 'center',
-              width: 34,
-            }}
-          >
-            <Text
-              style={{
-                color: theme.colors.gold,
-                fontFamily: theme.fonts.bold,
-                fontSize: 11,
-              }}
-            >
-              DF
-            </Text>
-          </View>
+          <Avatar initials="+" size={34} active={false} />
           <Text
             style={{
-              color: theme.colors.ink,
-              flex: 1,
+              color: theme.colors.inkMuted,
               fontFamily: theme.fonts.regular,
-              fontSize: 13,
+              fontSize: 12,
             }}
           >
-            default
+            ADD PROFILE
           </Text>
-          <Text
-            style={{
-              color: theme.colors.gold,
-              fontFamily: theme.fonts.bold,
-              fontSize: 10,
-              letterSpacing: 0.4,
-            }}
-          >
-            ACTIVE
-          </Text>
-        </View>
+        </Pressable>
 
         <Text
           style={{
@@ -126,8 +195,8 @@ export default function ProfilesScreen() {
             paddingHorizontal: 2,
           }}
         >
-          this hermes runs a single profile — switching activates when the host
-          enables multiplexing and a second profile exists
+          this hermes runs a single profile server-side — switching here keeps a
+          separate local scrollback and token count per profile
         </Text>
 
         {connection ? (

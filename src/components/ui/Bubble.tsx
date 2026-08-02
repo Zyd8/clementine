@@ -1,12 +1,15 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 
+import { Avatar } from '@/components/ui/Avatar';
 import { useTheme } from '@/hooks/useTheme';
 
 type BubbleProps = {
   role: 'user' | 'assistant' | 'error';
   text: string;
   streaming?: boolean;
+  /** Profile initials, shown beside an agent turn. Assistant role only. */
+  avatar?: string;
   testID?: string;
 };
 
@@ -22,19 +25,20 @@ type BubbleProps = {
  * voice pipeline); today the region is declared but the text updates per
  * delta.
  */
-export function Bubble({ role, text, streaming, testID }: BubbleProps) {
+export function Bubble({ role, text, streaming, avatar, testID }: BubbleProps) {
   const theme = useTheme();
 
   const accent = role === 'error' ? theme.colors.err : theme.colors.gold;
   const isUser = role === 'user';
 
-  return (
+  const body = (
     <View
       testID={testID}
       accessibilityLiveRegion={role === 'assistant' && streaming ? 'polite' : 'none'}
       style={{
         alignSelf: isUser ? 'flex-end' : 'flex-start',
         maxWidth: isUser ? '82%' : '100%',
+        flexShrink: 1,
         backgroundColor: isUser ? theme.colors.canvasRaised : 'transparent',
         borderLeftColor: isUser ? undefined : accent,
         borderLeftWidth: isUser ? 0 : 2,
@@ -63,6 +67,19 @@ export function Bubble({ role, text, streaming, testID }: BubbleProps) {
           </Text>
         ) : null}
       </Text>
+    </View>
+  );
+
+  // The agent's turns are attributed to the active profile; the user's are
+  // not — a bubble on the right is unambiguously theirs.
+  if (avatar === undefined || role !== 'assistant') return body;
+
+  return (
+    <View style={{ alignSelf: 'flex-start', flexDirection: 'row', gap: 8, maxWidth: '88%' }}>
+      <View style={{ marginTop: 9 }}>
+        <Avatar initials={avatar} size={24} />
+      </View>
+      {body}
     </View>
   );
 }

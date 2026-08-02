@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import {
   FlatList,
@@ -9,15 +10,21 @@ import {
   View,
 } from 'react-native';
 
+import { ProfilePicker } from '@/components/features/ProfilePicker';
+import { ThinkingDots } from '@/components/features/ThinkingDots';
 import { ToolCallCard } from '@/components/features/ToolCallCard';
+import { Avatar } from '@/components/ui/Avatar';
 import { Bubble } from '@/components/ui/Bubble';
 import { MicButton } from '@/components/ui/MicButton';
 import { useChat } from '@/hooks/useChat';
-import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useTheme } from '@/hooks/useTheme';
+import { useVoiceChat } from '@/hooks/useVoiceChat';
+import { useBudgetStore } from '@/stores/budget';
 import { useChatStore, type FeedItem } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
+import { useProfilesStore } from '@/stores/profiles';
 import { useUsageStore } from '@/stores/usage';
+import { formatTokens } from '@/utils/formatTokens';
 
 /**
  * The chat surface: a terminal scrollback where user turns, agent turns and
@@ -26,17 +33,34 @@ import { useUsageStore } from '@/stores/usage';
 export default function ChatScreen() {
   const theme = useTheme();
   const connection = useConnectionStore((s) => s.connection);
-  const feed = useChatStore((s) => s.feed(null));
-  const usage = useUsageStore((s) => s.total(null));
-  const { send, stop, isStreaming } = useChat();
-  const { voiceState, tapMic } = useVoiceChat();
+
+  const profiles = useProfilesStore((s) => s.profiles);
+  const activeId = useProfilesStore((s) => s.activeId);
+  const selectProfile = useProfilesStore((s) => s.select);
+  const profileId = useProfilesStore((s) => s.activeProfileId)();
+  const activeProfile = profiles.find((p) => p.id === activeId);
+  const avatar = activeProfile?.avatar ?? 'DF';
+
+  const feed = useChatStore((s) => s.feed(profileId));
+  const activeRun = useChatStore((s) => s.activeRun(profileId));
+  const usage = useUsageStore((s) => s.total(profileId));
+  const isOverBudget = useBudgetStore((s) => s.isOverBudget);
+
+  const { send, stop, isStreaming } = useChat(profileId);
+  const { voiceState, tapMic } = useVoiceChat(profileId);
   const [draft, setDraft] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const onSend = () => {
     const text = draft;
     setDraft('');
     void send(text);
   };
+
+  // A run is live but nothing has streamed yet — on a tool-heavy turn that
+  // gap runs to seconds, and an empty scrollback reads as a hang.
+  const showThinking =
+    activeRun !== null && !feed.some((item) => item.kind === 'assistant');
 
   const renderItem = ({ item }: { item: FeedItem }) => {
     if (item.kind === 'tool') {
@@ -53,29 +77,111 @@ export default function ChatScreen() {
       <Bubble
         role={item.kind === 'error' ? 'error' : item.kind}
         text={item.text}
-        {...(item.kind === 'assistant' ? { streaming: item.streaming } : {})}
+        {...(item.kind === 'assistant'
+          ? { streaming: item.streaming, avatar }
+          : {})}
       />
     );
   };
+
+  if (!connection) {
+    return (
+      <View
+        style={{
+          alignItems: 'center',
+          backgroundColor: theme.colors.canvas,
+          flex: 1,
+          gap: theme.spacing.md,
+          justifyContent: 'center',
+          padding: 32,
+        }}
+      >
+        <View
+          style={{
+            alignItems: 'center',
+            borderColor: theme.colors.steel,
+            borderRadius: theme.radius.full,
+            borderWidth: 1,
+            height: 56,
+            justifyContent: 'center',
+            width: 56,
+          }}
+        >
+          <Text style={{ color: theme.colors.inkMuted, fontSize: 22 }}>◆</Text>
+        </View>
+        <Text
+          style={{
+            color: theme.colors.ink,
+            fontFamily: theme.fonts.semibold,
+            fontSize: 14,
+            textAlign: 'center',
+          }}
+        >
+          no hermes instance connected
+        </Text>
+        <Text
+          style={{
+            color: theme.colors.inkMuted,
+            fontFamily: theme.fonts.regular,
+            fontSize: 12,
+            lineHeight: 19,
+            maxWidth: 260,
+            textAlign: 'center',
+          }}
+        >
+          point this app at a Hermes instance to start a chat — server URL + API
+          key from that host&apos;s .env.
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/setup')}
+          style={{
+            backgroundColor: theme.colors.gold,
+            borderRadius: theme.radius.md,
+            marginTop: 6,
+            paddingHorizontal: 22,
+            paddingVertical: 12,
+          }}
+        >
+          <Text
+            style={{
+              color: theme.colors.canvas,
+              fontFamily: theme.fonts.bold,
+              fontSize: 12,
+              letterSpacing: 0.5,
+            }}
+          >
+            + CONNECT HERMES
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
     >
-      {/* Identity only. Navigation moved to the tab bar and the theme control
-          to the settings tab, which is what left room for the endpoint name. */}
       <View
         style={{
+          alignItems: 'center',
           borderBottomColor: theme.colors.steel,
           borderBottomWidth: 1,
+          flexDirection: 'row',
           gap: theme.spacing.sm,
+          justifyContent: 'space-between',
           paddingHorizontal: theme.spacing.md,
           paddingVertical: 14,
         }}
       >
         <View
-          style={{ alignItems: 'center', flexDirection: 'row', gap: theme.spacing.sm }}
+          style={{
+            alignItems: 'center',
+            flex: 1,
+            flexDirection: 'row',
+            gap: theme.spacing.sm,
+          }}
         >
           {/* Gold while the agent is working, steel when idle — the whole
               design language in one 8px dot. */}
@@ -93,39 +199,31 @@ export default function ChatScreen() {
             style={{
               color: theme.colors.ink,
               flex: 1,
-              fontFamily: theme.typography.mono.fontFamily,
-              fontSize: theme.typography.mono.fontSize,
+              fontFamily: theme.fonts.semibold,
+              fontSize: 14,
             }}
           >
-            {connection?.name ?? connection?.baseUrl ?? 'NOT CONNECTED'}
+            {connection.name || connection.baseUrl}
           </Text>
-          {/* A readout, not a control — the audit's "looks like one thing,
-              navigates somewhere else" finding. SETUP is its own link below. */}
-          {usage.totalTokens > 0 ? (
-            <View
-              testID="usage-badge"
-              style={{
-                backgroundColor: theme.colors.canvasRaised,
-                borderColor: theme.colors.steel,
-                borderRadius: theme.radius.full,
-                borderWidth: 1,
-                paddingHorizontal: theme.spacing.sm,
-                paddingVertical: 2,
-              }}
-            >
-              <Text
-                style={{
-                  color: theme.colors.inkMuted,
-                  fontFamily: theme.typography.mono.fontFamily,
-                  fontSize: 11,
-                }}
-              >
-                {`${usage.totalTokens} tok`}
-              </Text>
-            </View>
-          ) : null}
         </View>
 
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Switch profile"
+          onPress={() => setPickerOpen(true)}
+          style={{ alignItems: 'center', flexDirection: 'row', gap: 6 }}
+        >
+          <Avatar initials={avatar} size={26} />
+          <Text
+            style={{
+              color: theme.colors.ink,
+              fontFamily: theme.fonts.semibold,
+              fontSize: 11.5,
+            }}
+          >
+            {activeProfile?.name ?? 'default'}
+          </Text>
+        </Pressable>
       </View>
 
       <FlatList
@@ -133,6 +231,65 @@ export default function ChatScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={{ gap: theme.spacing.sm, padding: theme.spacing.md }}
+        ListHeaderComponent={
+          <View style={{ gap: theme.spacing.sm, marginBottom: theme.spacing.sm }}>
+            <View
+              testID="usage-badge"
+              style={{
+                alignSelf: 'center',
+                backgroundColor: theme.colors.canvasRaised,
+                borderColor: theme.colors.steel,
+                borderRadius: theme.radius.sm,
+                borderWidth: 1,
+                paddingHorizontal: theme.spacing.sm,
+                paddingVertical: 4,
+              }}
+            >
+              <Text
+                style={{
+                  color: theme.colors.inkMuted,
+                  fontFamily: theme.fonts.regular,
+                  fontSize: 11,
+                }}
+              >
+                {`${formatTokens(usage.totalTokens)} used today`}
+              </Text>
+            </View>
+
+            {isOverBudget(usage.totalTokens) ? (
+              <View
+                testID="budget-warning"
+                style={{
+                  alignSelf: 'center',
+                  backgroundColor: theme.colors.canvasRaised,
+                  borderColor: theme.colors.goldDim,
+                  borderRadius: theme.radius.sm,
+                  borderWidth: 1,
+                  paddingHorizontal: 10,
+                  paddingVertical: 8,
+                }}
+              >
+                <Text
+                  style={{
+                    color: theme.colors.gold,
+                    fontFamily: theme.fonts.regular,
+                    fontSize: 11,
+                  }}
+                >
+                  {`⚠ this endpoint has used ${formatTokens(usage.totalTokens)} today`}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        }
+        ListFooterComponent={
+          showThinking ? (
+            <View style={{ alignItems: 'flex-start', flexDirection: 'row', gap: 8 }}>
+              <Avatar initials={avatar} size={24} />
+              <ThinkingDots testID="thinking" />
+            </View>
+          ) : null
+        }
       />
 
       <View
@@ -141,15 +298,16 @@ export default function ChatScreen() {
           borderTopColor: theme.colors.steel,
           borderTopWidth: 1,
           flexDirection: 'row',
-          gap: theme.spacing.sm,
-          padding: theme.spacing.md,
+          gap: 10,
+          paddingHorizontal: 14,
+          paddingVertical: 12,
         }}
       >
         <TextInput
           aria-label="Message"
           value={draft}
           onChangeText={setDraft}
-          placeholder="message the agent…"
+          placeholder={isStreaming ? 'agent is working…' : 'message the agent…'}
           placeholderTextColor={theme.colors.inkMuted}
           onSubmitEditing={onSend}
           style={{
@@ -159,9 +317,10 @@ export default function ChatScreen() {
             borderWidth: 1,
             color: theme.colors.ink,
             flex: 1,
-            fontFamily: theme.typography.body.fontFamily,
-            fontSize: theme.typography.body.fontSize,
-            padding: theme.spacing.sm,
+            fontFamily: theme.fonts.regular,
+            fontSize: 13.5,
+            paddingHorizontal: 12,
+            paddingVertical: 11,
           }}
         />
         <Pressable
@@ -179,18 +338,27 @@ export default function ChatScreen() {
           <Text
             style={{
               color: theme.colors.canvas,
-              fontFamily: theme.typography.mono.fontFamily,
-              fontWeight: '700',
+              fontFamily: theme.fonts.bold,
+              fontSize: 16,
             }}
           >
             {isStreaming ? '■' : '➜'}
           </Text>
         </Pressable>
         {/* Tap-to-talk. The hook owns the ASR/TTS lifecycle; this is the only
-            place it is reachable from. 46px per the handoff composer spec —
+            place it is reachable from. 46px per the design's composer row —
             the 64px circle belongs to the full-screen voice overlay. */}
         <MicButton voiceState={voiceState} onPress={tapMic} size={46} />
       </View>
+
+      <ProfilePicker
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        endpointName={connection.name || connection.baseUrl}
+        profiles={profiles}
+        activeId={activeId}
+        onSelectProfile={(id) => void selectProfile(id)}
+      />
     </KeyboardAvoidingView>
   );
 }

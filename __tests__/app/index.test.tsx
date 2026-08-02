@@ -31,6 +31,7 @@ jest.mock('@/stores/chat', () => {
   return {
     useChatStore: zustand.create(() => ({
       feed: () => STABLE_FEED,
+      activeRun: () => null,
       reset: () => {},
       appendUserMessage: () => {},
       applyEvent: () => {},
@@ -82,7 +83,27 @@ describe('ChatScreen — header', () => {
     const style = flatten(badge.props.style);
     expect(style.backgroundColor).toBe(darkTheme.colors.canvasRaised);
     expect(style.borderColor).toBe(darkTheme.colors.steel);
-    expect(screen.getByText('66809 tok')).toBeTruthy();
+    // The design abbreviates and says what the number means.
+    expect(screen.getByText('66.8K tok used today')).toBeTruthy();
+  });
+
+  /** Below 90% of the 150K default limit, so the banner stays away. */
+  it('hides the budget warning under the limit', async () => {
+    await render(<ChatScreen />);
+    expect(screen.queryByTestId('budget-warning')).toBeNull();
+  });
+
+  it('warns once usage crosses 90% of the daily budget', async () => {
+    mockUsage = { inputTokens: 100_000, outputTokens: 42_300, totalTokens: 142_300 };
+    await render(<ChatScreen />);
+    expect(screen.getByTestId('budget-warning')).toBeTruthy();
+    expect(screen.getByText(/142.3K tok today/)).toBeTruthy();
+  });
+
+  it('shows the active profile as a chip that opens the switcher', async () => {
+    await render(<ChatScreen />);
+    expect(screen.getByLabelText('Switch profile')).toBeTruthy();
+    expect(screen.getByText('default')).toBeTruthy();
   });
 
   /**
