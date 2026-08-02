@@ -21,6 +21,13 @@ type ProviderPickerProps<T extends string> = {
   keys: Record<string, string>;
   onKeyChange: (provider: T, value: string) => void;
   testIDPrefix: string;
+  /**
+   * Provider-specific controls drawn inside the selected provider's expanded
+   * section, under the key field. Receives the selected provider so a caller
+   * can render nothing for providers without extras (e.g. MiniMax's voice
+   * picker, which other providers do not have).
+   */
+  extraContent?: (value: T) => React.ReactNode;
 };
 
 /**
@@ -42,6 +49,7 @@ export function ProviderPicker<T extends string>({
   keys,
   onKeyChange,
   testIDPrefix,
+  extraContent,
 }: ProviderPickerProps<T>) {
   const theme = useTheme();
 
@@ -110,6 +118,7 @@ export function ProviderPicker<T extends string>({
                   placeholder="paste the provider's key"
                   secret
                 />
+                {extraContent ? extraContent(value) : null}
               </View>
             ) : null}
           </View>

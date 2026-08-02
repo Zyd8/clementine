@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/react-native';
 
 import { createMp3Playback } from './audioPlayback';
+import { DEFAULT_MINIMAX_VOICE } from '@/constants/minimaxVoices';
 import { createSpeechOrder } from './speechOrder';
 import type { TtsCallbacks, TtsProvider } from './tts';
 
@@ -32,8 +33,8 @@ export const MINIMAX_T2A_URL = 'https://api.minimax.io/v1/t2a_v2';
  */
 export const MINIMAX_MODEL = 'speech-2.8-turbo';
 
-/** Used when the user has picked MiniMax but not a specific voice. */
-export const DEFAULT_MINIMAX_VOICE = 'English_Graceful_Lady';
+/** The default lives with the voice list so the picker and provider cannot drift. */
+export { DEFAULT_MINIMAX_VOICE };
 
 /** Cache subdirectory, kept separate so a stale clip is traceable. */
 const MINIMAX_AUDIO_DIR = 'minimax-tts';

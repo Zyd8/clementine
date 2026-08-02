@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
+import { Text } from 'react-native';
 
 import { useSettingsStore } from '@/stores/settings';
 
@@ -101,5 +102,19 @@ describe('ProviderPicker', () => {
 
     const keyless = screen.getByTestId('tts-device').props.accessibilityState;
     expect(keyless.selected).toBe(false);
+  });
+
+  /** Provider-specific extras (e.g. MiniMax's voice picker) hang off the key. */
+  it('renders provider extras under the key of the selected provider', async () => {
+    const extraContent = jest.fn(() => <Text>EXTRA</Text>);
+    await setup({ selected: 'openai', extraContent });
+    expect(extraContent).toHaveBeenCalledWith('openai');
+    expect(screen.getByText('EXTRA')).toBeTruthy();
+  });
+
+  it('renders no extras for a provider that is not expanded', async () => {
+    const extraContent = jest.fn(() => <Text>EXTRA</Text>);
+    await setup({ selected: 'device', extraContent });
+    expect(extraContent).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@ import {
 } from 'react-native';
 
 import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
+import { MiniMaxVoicePicker } from '@/components/features/MiniMaxVoicePicker';
 import { ProviderPicker } from '@/components/features/ProviderPicker';
 import { Stepper } from '@/components/ui/Stepper';
 import { useTheme } from '@/hooks/useTheme';
@@ -222,6 +223,15 @@ export default function SettingsScreen() {
             keys={voiceProfile.tts.keys}
             onKeyChange={setTtsKey}
             testIDPrefix="tts"
+            extraContent={(provider) =>
+              provider === 'minimax' ? (
+                <MiniMaxVoicePicker
+                  value={voiceProfile.tts.voiceId ?? ''}
+                  onChange={(voiceId) => void updateTtsConfig({ voiceId })}
+                  testIDPrefix="tts-minimax"
+                />
+              ) : null
+            }
           />
         </View>
 
