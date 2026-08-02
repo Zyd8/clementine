@@ -39,10 +39,18 @@ function relativeTime(iso: string): string {
 
 /** Build the display title: root sessions show the title, forks append branch info. */
 function displayTitle(session: SessionSummary): string {
+  const base = session.title || session.preview || 'Untitled session';
   if (session.parentId !== undefined && session.branchIndex !== undefined) {
-    return `${session.title} · b${session.branchIndex}`;
+    return `${base} · b${session.branchIndex}`;
   }
-  return session.title;
+  return base;
+}
+
+/** A short id fragment for the row, e.g. "run_0a868c…" → "0a868c". */
+function shortId(id: string): string {
+  // ids look like run_<24 hex> or api_<timestamp>_<8 hex>. Keep the tail.
+  const tail = id.split('_').pop() ?? id;
+  return tail.length > 8 ? tail.slice(0, 8) : tail;
 }
 
 export function SessionRow({
@@ -56,6 +64,8 @@ export function SessionRow({
   const isFork = session.parentId !== undefined;
   const title = displayTitle(session);
   const time = relativeTime(session.lastMessageAt);
+  // The preview line is redundant when the title fell back to it.
+  const showPreview = !!session.preview && session.preview !== title;
 
   return (
     <Pressable
@@ -100,31 +110,47 @@ export function SessionRow({
           </Text>
         </View>
 
-        {/* Preview — one line, muted, small. Matches the settings/profiles
-            tab scale rather than the chat body scale. */}
-        <Text
-          numberOfLines={1}
-          style={{
-            color: theme.colors.inkMuted,
-            fontFamily: theme.typography.body.fontFamily,
-            fontSize: theme.type(11),
-            lineHeight: theme.type(15),
-          }}
-        >
-          {session.preview}
-        </Text>
-
-        {/* Metadata row: message count + fork button */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 1 }}>
+        {/* Preview — one line, muted, small. Hidden when the title already
+            IS the preview (title-less sessions fall back to it), so the
+            message isn't shown twice. */}
+        {showPreview ? (
           <Text
+            numberOfLines={1}
             style={{
               color: theme.colors.inkMuted,
-              fontFamily: theme.typography.mono.fontFamily,
-              fontSize: theme.type(10),
+              fontFamily: theme.typography.body.fontFamily,
+              fontSize: theme.type(11),
+              lineHeight: theme.type(15),
             }}
           >
-            {session.messageCount} msgs
+            {session.preview}
           </Text>
+        ) : null}
+
+        {/* Metadata row: short id + message count, fork rightmost */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 1 }}>
+          <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
+            <Text
+              testID="session-id"
+              style={{
+                color: theme.colors.inkMuted,
+                fontFamily: theme.typography.mono.fontFamily,
+                fontSize: theme.type(9),
+                opacity: 0.7,
+              }}
+            >
+              #{shortId(session.id)}
+            </Text>
+            <Text
+              style={{
+                color: theme.colors.inkMuted,
+                fontFamily: theme.typography.mono.fontFamily,
+                fontSize: theme.type(10),
+              }}
+            >
+              {session.messageCount} msgs
+            </Text>
+          </View>
           <Pressable
             accessibilityLabel={`Fork ${title}`}
             onPress={() => onFork(session.id)}

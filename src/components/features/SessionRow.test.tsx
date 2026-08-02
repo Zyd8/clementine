@@ -50,6 +50,30 @@ describe('SessionRow', () => {
     expect(screen.getByText('5 msgs')).toBeTruthy();
   });
 
+  it('falls back to the preview when there is no title', async () => {
+    await render(
+      <SessionRow
+        session={{ ...baseSession, title: '' }}
+        onTap={jest.fn()}
+        onFork={jest.fn()}
+      />,
+    );
+    // The preview becomes the title line; it must not also render below it.
+    expect(screen.getByText('What is the error in the logs?')).toBeTruthy();
+  });
+
+  it('shows a short session id fragment', async () => {
+    await render(
+      <SessionRow
+        session={{ ...baseSession, id: 'run_0a868c4e34ab47c7a506e0d73658e35e' }}
+        onTap={jest.fn()}
+        onFork={jest.fn()}
+      />,
+    );
+    // run_<24 hex> → the 8-char tail fragment.
+    expect(screen.getByText('#0a868c4e')).toBeTruthy();
+  });
+
   it('renders a relative timestamp', async () => {
     await render(
       <SessionRow

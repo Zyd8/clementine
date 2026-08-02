@@ -26,6 +26,7 @@ type WireSession = {
   user_id: string;
   model: string;
   title: string;
+  preview?: string;
   started_at: string;
   ended_at: string;
   end_reason: string;
@@ -57,7 +58,7 @@ function normalizeSession(w: WireSession): SessionSummary {
   return {
     id: w.id,
     title: w.title,
-    preview: '',
+    preview: w.preview ?? '',
     lastMessageAt: w.started_at,
     messageCount: w.message_count,
     ...(w.parent_session_id ? { parentId: w.parent_session_id } : {}),
