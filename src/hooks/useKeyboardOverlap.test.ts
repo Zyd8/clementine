@@ -1,7 +1,7 @@
 import { renderHook, act } from '@testing-library/react-native';
 import { Keyboard, Platform, type View } from 'react-native';
 
-import { useKeyboardOverlap } from './useKeyboardOverlap';
+import { KEYBOARD_CLEARANCE, useKeyboardOverlap } from './useKeyboardOverlap';
 
 type Listener = (event: { endCoordinates: { screenY: number } }) => void;
 
@@ -43,14 +43,15 @@ describe('useKeyboardOverlap', () => {
 
   it('reports how far the keyboard covers the view', async () => {
     const { listeners } = wireKeyboard();
-    // Composer occupies 700–760; keyboard starts at 500 → 260 covered.
+    // Composer occupies 700–760; keyboard starts at 500 → 260 covered, plus
+    // the clearance margin so the input sits fully clear.
     const ref = viewAt(700, 60);
     const { result } = await renderHook(() => useKeyboardOverlap(ref));
 
     await act(async () => {
       listeners[SHOW]?.({ endCoordinates: { screenY: 500 } });
     });
-    expect(result.current).toBe(260);
+    expect(result.current).toBe(260 + KEYBOARD_CLEARANCE);
   });
 
   /**
@@ -77,7 +78,7 @@ describe('useKeyboardOverlap', () => {
     await act(async () => {
       listeners[SHOW]?.({ endCoordinates: { screenY: 500 } });
     });
-    expect(result.current).toBe(260);
+    expect(result.current).toBe(260 + KEYBOARD_CLEARANCE);
 
     await act(async () => {
       listeners[HIDE]?.({ endCoordinates: { screenY: 0 } });

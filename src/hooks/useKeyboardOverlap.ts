@@ -45,6 +45,17 @@ export type KeyboardProbe = {
   overlap: number;
 };
 
+/**
+ * Safety margin added to the measured overlap.
+ *
+ * The keyboard's `screenY` and the view's `measureInWindow` position can be
+ * off by a few points (gesture bar, status-bar inset, rounding), which shows
+ * up as the composer's top few pixels peeking above the keyboard. A small
+ * constant clearance guarantees the input sits fully clear without the
+ * over-lift that a large buffer would cause.
+ */
+export const KEYBOARD_CLEARANCE = 12;
+
 export function useKeyboardOverlap(
   ref: RefObject<Measurable | null>,
   onProbe?: (probe: KeyboardProbe) => void,
@@ -76,9 +87,11 @@ export function useKeyboardOverlap(
       }
       node.measureInWindow((_x, y, _width, height) => {
         const viewBottom = y + height;
-        const next = Math.max(0, viewBottom - keyboardTop);
-        setOverlap(next);
-        onProbe?.({ events, keyboardTop, keyboardHeight, viewBottom, overlap: next });
+        const covered = Math.max(0, viewBottom - keyboardTop);
+        // Clearance only when the keyboard actually covers something — never
+        // push the input up when the keyboard is closed or already clear.
+        setOverlap(covered > 0 ? covered + KEYBOARD_CLEARANCE : 0);
+        onProbe?.({ events, keyboardTop, keyboardHeight, viewBottom, overlap: covered });
       });
     });
 
