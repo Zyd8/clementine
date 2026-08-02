@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 
 import { ProfilePicker } from '@/components/features/ProfilePicker';
@@ -43,6 +43,15 @@ export default function ChatScreen() {
   // KeyboardAvoidingView did nothing on Android — see useKeyboardOverlap.
   const composerRef = useRef<View>(null);
   const keyboardOverlap = useKeyboardOverlap(composerRef);
+
+  // Follows the reply as it streams in. `feed` gets a new array reference on
+  // every delta (the store rebuilds it immutably), so this fires per-token,
+  // not just per-message — without it, a long reply grows past the bottom
+  // of the screen and the user has to keep scrolling down by hand to read it.
+  const feedListRef = useRef<FlatList<FeedItem>>(null);
+  useEffect(() => {
+    feedListRef.current?.scrollToEnd({ animated: true });
+  }, [feed]);
 
   const onSend = () => {
     const text = draft;
@@ -217,6 +226,7 @@ export default function ChatScreen() {
       </View>
 
       <FlatList
+        ref={feedListRef}
         testID="chat-feed"
         data={feed}
         keyExtractor={(item) => item.id}

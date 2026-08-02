@@ -1,7 +1,9 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react-native';
+import { act, render, screen, fireEvent } from '@testing-library/react-native';
+import { FlatList } from 'react-native';
 
 import { darkTheme } from '@/constants/theme';
+import { useChatStore } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -167,5 +169,31 @@ describe('ChatScreen — composer', () => {
     // The FlatList renders as a scroll view; find it by its testID-free role.
     const list = screen.getByTestId('chat-feed');
     expect(flatten(list.props.style).flex).toBe(1);
+  });
+
+  /**
+   * A long reply grows past the bottom of the screen as it streams — without
+   * this, reading it means scrolling down by hand, repeatedly, while it is
+   * still arriving.
+   */
+  it('scrolls to the end whenever the feed updates', async () => {
+    const scrollSpy = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => undefined);
+
+    await render(<ChatScreen />);
+    scrollSpy.mockClear(); // ignore whatever the initial mount triggered
+
+    // A stable reference, like the real store's — a selector returning a
+    // fresh array on every read (rather than only on an actual update) never
+    // settles, since every render looks like a change.
+    const nextFeed = [{ kind: 'user' as const, id: '1', text: 'hi' }];
+    await act(async () => {
+      useChatStore.setState({ feed: () => nextFeed } as never);
+    });
+
+    expect(scrollSpy).toHaveBeenCalledWith(expect.objectContaining({ animated: true }));
+
+    scrollSpy.mockRestore();
   });
 });

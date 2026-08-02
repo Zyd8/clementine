@@ -5,7 +5,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { VoiceMeter } from '@/components/features/VoiceMeter';
 import { VoiceWaveform } from '@/components/features/VoiceWaveform';
-import { SpeechPulse } from '@/components/ui/SpeechPulse';
 import { useSyntheticSpeechLevel } from '@/hooks/useSyntheticSpeechLevel';
 import { useTheme } from '@/hooks/useTheme';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
@@ -168,9 +167,9 @@ export default function VoiceScreen() {
             borderColor: thinking ? theme.colors.steel : theme.colors.gold,
             borderRadius: theme.radius.full,
             borderWidth: thinking ? 1 : 2,
-            height: 120,
+            height: 176,
             justifyContent: 'center',
-            width: 120,
+            width: 176,
           }}
         >
           <VoiceWaveform
@@ -178,15 +177,6 @@ export default function VoiceScreen() {
             isActive={!thinking}
             barCount={6}
             testID="voice-waveform"
-          />
-          {/* Green flash while your voice is actually reaching the mic — the
-              state label reads "listening" whether it is working or not. */}
-          <SpeechPulse
-            level={audioLevel}
-            floor={speechThreshold}
-            listening={voiceState === 'LISTENING'}
-            inset={6}
-            testID="voice-speech-pulse"
           />
         </Pressable>
 
