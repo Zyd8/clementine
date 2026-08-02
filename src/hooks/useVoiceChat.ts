@@ -284,6 +284,32 @@ export function useVoiceChat(profileId: ProfileId = null) {
         // (or anything else) three times in a row.
         let toolNarrated = false;
 
+        // Emits whatever text is still sitting in the sentence buffer with
+        // no boundary yet (a trailing fragment like "and that's the answer"
+        // with no closing period). Idempotent — a no-op once the buffer is
+        // already empty. Must run before `checkForCompletion` can declare
+        // the turn done: `run.completed` can arrive while a final fragment
+        // is still unflushed, and checking completion first would call
+        // `tts.speak()` on that fragment (below, after the loop) only
+        // *after* the mic had already reopened — reading as "the interrupt
+        // button vanished mid-reply" and the mic hearing the AI's own last
+        // sentence.
+        const flushRemaining = () => {
+          sentenceBufRef.current.flush((sentence) => {
+            void tts.speak(sentence).catch((err) => {
+              Sentry.captureException(
+                err instanceof Error ? err : new Error(String(err)),
+                { tags: { reason: 'voice' } },
+              );
+            });
+            if (firstSentence && stateRef.current === 'PROCESSING') {
+              firstSentence = false;
+              setStatus('Speaking…');
+              transition('PLAYING');
+            }
+          });
+        };
+
         // Stream SSE events
         for await (const event of streamRunEvents(baseUrl, apiKey, runId)) {
           useChatStore.getState().applyEvent(profileId, event);
@@ -340,6 +366,10 @@ export function useVoiceChat(profileId: ProfileId = null) {
             if (event.usage) {
               useUsageStore.getState().addUsage(profileId, event.usage);
             }
+            // A trailing fragment with no sentence boundary yet must reach
+            // tts.speak() — and isPlaying() must see it — before completion
+            // is evaluated below.
+            flushRemaining();
             // The run is genuinely over. If nothing is left playing —
             // everything queued already finished before this arrived —
             // there is no future onAllDone coming to catch it, so check now
@@ -365,20 +395,10 @@ export function useVoiceChat(profileId: ProfileId = null) {
           }
         }
 
-        // Flush any remaining buffered text
-        sentenceBufRef.current.flush((sentence) => {
-          void tts.speak(sentence).catch((err) => {
-            Sentry.captureException(
-              err instanceof Error ? err : new Error(String(err)),
-              { tags: { reason: 'voice' } },
-            );
-          });
-          if (firstSentence && stateRef.current === 'PROCESSING') {
-            firstSentence = false;
-            setStatus('Speaking…');
-            transition('PLAYING');
-          }
-        });
+        // Normally already a no-op — `run.completed` above already flushed
+        // the buffer. Kept as a fallback for a stream that ends without ever
+        // sending that event.
+        flushRemaining();
 
         // If no sentences ever came through (silent run), just go to idle
         if (stateRef.current === 'PROCESSING') {

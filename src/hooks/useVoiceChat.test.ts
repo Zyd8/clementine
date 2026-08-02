@@ -703,6 +703,58 @@ describe('useVoiceChat', () => {
     });
 
     /**
+     * The regression this guards: `run.completed` arrived while a trailing
+     * sentence fragment (no `.`/`!`/`?` yet) was still sitting unflushed in
+     * the sentence buffer, and the completion check ran before that
+     * fragment ever reached `tts.speak()`. TTS had already finished the
+     * *previous* sentence by then, so `isPlaying()` read false, and the
+     * reply was declared complete and the mic reopened — while the last
+     * sentence had not been spoken yet. On screen that read as the
+     * interrupt button vanishing mid-reply; on the phone it meant the mic
+     * reopened to record the AI's own trailing sentence.
+     */
+    it('speaks a trailing unflushed fragment before declaring the reply complete', async () => {
+      mockedStream.mockReturnValue(
+        (async function* () {
+          yield { type: 'assistant.delta', text: 'Hi.' } as StreamEvent;
+          // The first sentence finishes playing (a real provider calls this
+          // itself once its queue drains) before any more text has arrived.
+          ttsCallbacks.current?.onAllDone();
+          // No sentence boundary — stays buffered until flushed.
+          yield { type: 'assistant.delta', text: 'And more' } as StreamEvent;
+          yield { type: 'run.completed', output: 'Hi. And more' } as StreamEvent;
+        })(),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      // The trailing fragment must have been spoken, and the turn must
+      // still be treated as live — not relistened over — until it's done.
+      const speak = ttsProvider.current?.speak as jest.Mock;
+      expect(speak).toHaveBeenCalledWith('And more');
+      expect(result.current.voiceState).toBe('PLAYING');
+
+      // Only once that final sentence itself finishes does the mic reopen.
+      await act(async () => {
+        ttsCallbacks.current?.onAllDone();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await waitFor(() => {
+        expect(result.current.voiceState).toBe('LISTENING');
+      });
+    });
+
+    /**
      * The regression this guards: barge-in opens the mic during the reply and
      * gives it back on teardown, but the relisten starts a turn BEFORE React
      * runs that teardown — so the teardown cancelled the recording the new
