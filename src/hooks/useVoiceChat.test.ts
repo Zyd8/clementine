@@ -13,6 +13,11 @@ import { useVoiceChat } from './useVoiceChat';
 // Mock the runs API (mirrors useChat.test.ts pattern)
 // A recorder that actually yields a clip, so `asr.stop()` reaches the
 // transcription call instead of short-circuiting on a null uri.
+//
+// Metering is a variable so a test can play the reply quietly and then talk
+// over it — barge-in measures the echo first, so a constant level is echo by
+// definition and must never trip it.
+let mockMetering = -20;
 jest.mock('expo-audio', () => ({
   AudioModule: {
     requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true })),
@@ -24,7 +29,7 @@ jest.mock('expo-audio', () => ({
     record: jest.fn(),
     stop: jest.fn(async () => undefined),
     uri: 'file:///clip.m4a',
-    getStatus: () => ({ metering: -20 }),
+    getStatus: () => ({ metering: mockMetering }),
   }),
 }));
 
@@ -91,6 +96,7 @@ beforeEach(() => {
     },
     hydrated: true,
   });
+  mockMetering = -20;
   mockedCreateRun.mockResolvedValue({ runId: 'run_abc', status: 'started' });
   mockedStream.mockReturnValue(streamOf([]));
   ttsCallbacks.current = null;
@@ -577,14 +583,54 @@ describe('useVoiceChat', () => {
         expect(result.current.voiceState).toBe('PLAYING');
       });
 
-      // The loud mic sustains past the barge-in threshold and the turn flips
-      // back to the user without onAllDone ever firing.
+      // The reply plays, and the mic hears only its echo.
+      mockMetering = -45;
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 700));
+      });
+      expect(result.current.voiceState).toBe('PLAYING');
+
+      // Now the user talks over it, well above the measured echo.
+      mockMetering = -3;
       await waitFor(
         () => {
           expect(result.current.voiceState).toBe('LISTENING');
         },
         { timeout: 3000 },
       );
+    });
+
+    /** The reply must not cut itself off — a steady level is its own echo. */
+    it('does not interrupt itself when only the reply is audible', async () => {
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'assistant.delta', text: 'A long reply.' } as StreamEvent,
+          { type: 'run.completed', output: 'A long reply.' } as StreamEvent,
+        ]),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+      await waitFor(() => {
+        expect(result.current.voiceState).toBe('PLAYING');
+      });
+
+      // A loud but STEADY level: the agent's own voice, never a barge-in.
+      mockMetering = -8;
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 1500));
+      });
+
+      expect(result.current.voiceState).toBe('PLAYING');
     });
   });
 

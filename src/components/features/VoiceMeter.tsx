@@ -32,9 +32,10 @@ type VoiceMeterProps = {
   margin: number;
   onMarginChange: (margin: number) => void;
   /**
-   * Whether the mic is open. When it closes the last live reading is held
-   * rather than zeroed — the moment the turn ends is exactly when you want to
-   * see what the level had reached — and labelled so it is not read as live.
+   * Whether the mic is open. When it closes, the loudest level of the turn is
+   * held rather than zeroed or trailing off — a turn ends BECAUSE the level
+   * fell, so the last sample is always near silence and says nothing about
+   * whether your voice was heard. The peak is the number worth reading.
    */
   listening: boolean;
   testID?: string;
@@ -53,21 +54,21 @@ export function VoiceMeter({
 }: VoiceMeterProps) {
   const theme = useTheme();
 
-  // The last level seen while the mic was open. Zeroing on close threw away
-  // the reading at the one moment worth reading: the turn ending.
-  //
-  // The live value is mirrored into a ref so that freezing it costs one
-  // render on the transition, rather than one per sample at 10Hz.
-  const live = useRef(level);
-  const [held, setHeld] = useState(level);
-  // Declared first so that on the commit where the mic closes it captures the
-  // PREVIOUS live level, before the mirror below overwrites it.
+  // The loudest level of the listening turn, kept in a ref so tracking it
+  // costs no renders at the 10Hz sample rate, and promoted to state only when
+  // the mic closes and it has to be displayed.
+  const peak = useRef(0);
+  const [held, setHeld] = useState(0);
+  // Declared first so that on the commit where the mic closes it reads the
+  // peak of the turn that just ended, before the tracker below resets it.
   useEffect(() => {
-    if (!listening) setHeld(live.current);
+    if (listening) return;
+    setHeld(peak.current);
   }, [listening]);
   useEffect(() => {
-    live.current = level;
-  }, [level]);
+    // A new turn starts its own peak; during one, only rises count.
+    peak.current = listening ? Math.max(peak.current, level) : 0;
+  }, [listening, level]);
 
   const shown = listening ? level : held;
   const isSpeech = shown >= threshold;
@@ -161,11 +162,11 @@ export function VoiceMeter({
       </View>
 
       <Text testID="voice-meter-verdict" style={caption}>
-        {listening ? (isSpeech ? 'speech' : 'room noise') : 'held'}
+        {listening ? (isSpeech ? 'speech' : 'room noise') : 'peak held'}
       </Text>
 
       <Text style={caption}>
-        {`lvl ${shown.toFixed(2)}  thr ${threshold.toFixed(2)}`}
+        {`${listening ? 'lvl' : 'pk'} ${shown.toFixed(2)}  thr ${threshold.toFixed(2)}`}
       </Text>
 
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: 6 }}>

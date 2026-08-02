@@ -117,15 +117,8 @@ describe('VoiceMeter', () => {
     expect(screen.getByText(/margin 0\.20/)).toBeTruthy();
   });
 
-  /**
-   * The turn ending is exactly when the reading matters — it is the level the
-   * decision was made on. Zeroing the bar there threw it away just as it
-   * became worth looking at.
-   */
-  it('holds the last live reading when the mic closes', async () => {
-    const { rerender } = await setup({ listening: true, level: 0.62 });
-
-    await rerender(
+  const close = (rerender: (ui: React.ReactElement) => unknown) =>
+    rerender(
       <VoiceMeter
         level={0}
         threshold={0.4}
@@ -134,24 +127,49 @@ describe('VoiceMeter', () => {
         listening={false}
       />,
     );
+
+  const speak = (rerender: (ui: React.ReactElement) => unknown, level: number) =>
+    rerender(
+      <VoiceMeter
+        level={level}
+        threshold={0.4}
+        margin={0.12}
+        onMarginChange={jest.fn()}
+        listening
+      />,
+    );
+
+  /**
+   * A turn ends BECAUSE the level fell, so the final sample is always near
+   * silence. Holding it showed a number that said nothing about whether the
+   * voice was heard; the peak of the turn is the reading worth keeping.
+   */
+  it('holds the loudest level of the turn, not the silence that ended it', async () => {
+    const { rerender } = await setup({ listening: true, level: 0.2 });
+    await speak(rerender, 0.62);
+    await speak(rerender, 0.05); // trailing off into the silence that ends it
+    await close(rerender);
 
     const style = flatten(screen.getByTestId('voice-meter-level').props.style);
     expect(style.width).toBe('62%');
   });
 
+  it('starts a fresh peak for each turn', async () => {
+    const { rerender } = await setup({ listening: true, level: 0.9 });
+    await close(rerender);
+    // A new, quieter turn must not inherit the previous turn's peak.
+    await speak(rerender, 0.3);
+    await close(rerender);
+
+    const style = flatten(screen.getByTestId('voice-meter-level').props.style);
+    expect(style.width).toBe('30%');
+  });
+
   it('marks a held reading so it is not read as live', async () => {
     const { rerender } = await setup({ listening: true, level: 0.62 });
-    await rerender(
-      <VoiceMeter
-        level={0}
-        threshold={0.4}
-        margin={0.12}
-        onMarginChange={jest.fn()}
-        listening={false}
-      />,
-    );
+    await close(rerender);
 
-    expect(screen.getByTestId('voice-meter-verdict').props.children).toBe('held');
+    expect(screen.getByTestId('voice-meter-verdict').props.children).toBe('peak held');
     const style = flatten(screen.getByTestId('voice-meter-level').props.style);
     expect(style.opacity).toBeLessThan(1);
   });
