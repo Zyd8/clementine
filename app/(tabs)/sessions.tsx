@@ -34,24 +34,19 @@ export default function SessionsScreen() {
 
   return (
     <View style={{ backgroundColor: theme.colors.canvas, flex: 1 }}>
-      {/* Title + active profile above, endpoint and NEW SESSION below —
-          the design's sessions header, which the tab bar now leaves room for. */}
+      {/* Header: SESSIONS left, active profile centered, NEW SESSION
+          rightmost. One row, three columns — the profile sits dead center. */}
       <View
         style={{
+          alignItems: 'center',
           borderBottomColor: theme.colors.steel,
           borderBottomWidth: 1,
-          gap: theme.spacing.xs,
+          flexDirection: 'row',
           paddingHorizontal: theme.spacing.md,
           paddingVertical: 14,
         }}
       >
-        <View
-          style={{
-            alignItems: 'center',
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-          }}
-        >
+        <View style={{ alignItems: 'flex-start', flex: 1 }}>
           <Text
             style={{
               color: theme.colors.ink,
@@ -62,50 +57,60 @@ export default function SessionsScreen() {
           >
             SESSIONS
           </Text>
-          <View style={{ alignItems: 'center', flexDirection: 'row', gap: 7 }}>
-            <Avatar initials={activeProfile?.avatar ?? 'DF'} size={22} />
-            <Text
-              style={{
-                color: theme.colors.ink,
-                fontFamily: theme.fonts.semibold,
-                fontSize: theme.type(11.5),
-              }}
-            >
-              {activeProfile?.name ?? 'default'}
-            </Text>
-          </View>
-        </View>
-        <View
-          style={{
-            alignItems: 'center',
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-          }}
-        >
           <Text
             numberOfLines={1}
             style={{
               color: theme.colors.inkMuted,
-              flex: 1,
               fontFamily: theme.fonts.regular,
               fontSize: theme.type(11),
+              marginTop: 2,
             }}
           >
             {connection?.name ?? 'no hermes connected'}
           </Text>
-          <Pressable onPress={onNewSession}>
-            <Text
-              style={{
-                color: theme.colors.gold,
-                fontFamily: theme.fonts.bold,
-                fontSize: theme.type(11),
-                letterSpacing: 0.4,
-              }}
-            >
-              NEW SESSION
-            </Text>
-          </Pressable>
         </View>
+
+        {/* Centered: the active profile's avatar + name. */}
+        <View
+          style={{
+            alignItems: 'center',
+            flexDirection: 'row',
+            gap: 7,
+            justifyContent: 'center',
+            position: 'absolute',
+            left: 0,
+            right: 0,
+          }}
+        >
+          <Avatar initials={activeProfile?.avatar ?? 'DF'} size={22} />
+          <Text
+            numberOfLines={1}
+            style={{
+              color: theme.colors.ink,
+              fontFamily: theme.fonts.semibold,
+              fontSize: theme.type(11.5),
+            }}
+          >
+            {activeProfile?.name ?? 'default'}
+          </Text>
+        </View>
+
+        <Pressable
+          accessibilityLabel="New session"
+          onPress={onNewSession}
+          style={{ alignItems: 'flex-end', flex: 1 }}
+        >
+          <Text
+            style={{
+              color: theme.colors.gold,
+              fontFamily: theme.fonts.bold,
+              fontSize: theme.type(11),
+              letterSpacing: 0.4,
+            }}
+          >
+            NEW SESSION
+          </Text>
+        </Pressable>
       </View>
 
       {error ? (
