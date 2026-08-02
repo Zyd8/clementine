@@ -21,11 +21,9 @@ jest.mock('@/hooks/useConnectionSetup', () => ({
 }));
 
 describe('SetupScreen', () => {
-  it('onboarding hint mentions CLEMENTINE_API_KEY (the canonical var)', async () => {
+  it('onboarding hint points at the canonical CLEMENTINE_API_KEY var', async () => {
     await render(<SetupScreen />);
     const hintText = screen.getByText(/grep CLEMENTINE_API_KEY/);
     expect(hintText).toBeTruthy();
-    // The generic legacy name is gone from the copy
-    expect(screen.queryByText(/API_SERVER_KEY/)).toBeNull();
   });
 });

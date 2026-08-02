@@ -202,11 +202,9 @@ CLEMENTINE_API_KEY=<long-random-secret>
 
 **Naming note.** `CLEMENTINE_API_KEY` is the canonical name — the only one
 docs, runbooks, and onboarding strings use. This repo's laptop Hermes runs a
-patched gateway that reads `CLEMENTINE_*` directly (alias helper, `API_SERVER_*`
-fallback); the VPS instance is not exposed to the app. If the laptop gateway is
-ever re-installed from stock upstream, re-apply the patch or the `API_SERVER_*`
-mirror lines — keep a mirror ready in the laptop `~/.hermes/.env` (both sets
-with matching values) until the rename lands upstream.
+patched gateway that reads `CLEMENTINE_*` directly; the VPS instance is not
+exposed to the app. If the laptop gateway is ever re-installed from stock
+upstream, re-apply the patch before enabling the API server.
 
 Server listens on `http://127.0.0.1:8642` by default. The mobile app reaches it
 over HTTPS via a reverse proxy (Caddy on the VPS) or Tailscale for dev.

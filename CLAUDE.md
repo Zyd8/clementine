@@ -42,8 +42,8 @@ Restated from `ARCHITECTURE.md` because they get violated under time pressure:
 ## Naming
 
 The Hermes host env vars for this app are `CLEMENTINE_API_ENABLED`,
-`CLEMENTINE_API_KEY`, and `CLEMENTINE_API_CORS_ORIGINS`. The older generic
-`API_SERVER_*` names are retired — don't reintroduce them, in docs or code.
+`CLEMENTINE_API_KEY`, and `CLEMENTINE_API_CORS_ORIGINS` — the canonical
+names. Always use these; never invent other names in docs or code.
 
 ## Hosts
 

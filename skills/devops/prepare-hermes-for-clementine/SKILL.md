@@ -1,3 +1,4 @@
+=== prepare-hermes skill ===
 ---
 name: prepare-hermes-for-clementine
 description: "Use when preparing a Hermes host so the Clementine mobile app can connect. Enables the API server, verifies the contract, checks reachability."
@@ -49,17 +50,13 @@ upstream — see "Profiles are not built yet" below).
    ```
    CLEMENTINE_API_ENABLED=true
    CLEMENTINE_API_KEY=<generate with: openssl rand -hex 32>
-
-   # Mirror — Hermes reads these names, not ours (see note below).
-   API_SERVER_ENABLED=true
-   API_SERVER_KEY=<same value as CLEMENTINE_API_KEY>
    ```
    `CLEMENTINE_API_KEY` is the canonical name for this project: it is what
-   the docs, the app's onboarding copy, and every runbook refer to. But the
-   Hermes gateway reads `API_SERVER_KEY` / `API_SERVER_ENABLED` from its own
-   source, so both must be present and identical or the API server will not
-   start. Drop the mirror lines only once upstream Hermes reads the
-   `CLEMENTINE_*` names.
+   the docs, the app's onboarding copy, and every runbook refer to. This
+   project's laptop Hermes runs a patched gateway that reads the
+   `CLEMENTINE_*` names directly. (If a host is running STOCK upstream
+   Hermes, `hermes update` reverts the patch — re-apply it or set the
+   mirror lines until the rename lands upstream.)
 
    Never reuse a key from another instance or paste one in from chat history
    — generate fresh, on this host, right now.
@@ -70,12 +67,10 @@ upstream — see "Profiles are not built yet" below).
 
 3. **Verify locally:**
    ```
-   curl -H "Authorization: Bearer $CLEMENTINE_API_KEY" http://127.0.0.1:8642/v1/capabilities
+   curl -H "Authorization: Bearer $CLEME..._KEY" http://127.0.0.1:8642/v1/capabilities
    ```
    Completion criterion: a 200 response with a JSON capabilities body. A 401
-   means the key isn't loaded (gateway needs a real restart, not a reload); a
-   connection refused usually means the mirrored `API_SERVER_ENABLED` is
-   missing — Hermes never reads `CLEMENTINE_API_ENABLED` directly.
+   means the key isn't loaded (gateway needs a real restart, not a reload).
 
 4. **Confirm the response shape** the app depends on. Flags live under
    `features` with snake_case names — `run_submission`, `run_events_sse`,
@@ -124,9 +119,9 @@ hand-roll them.
    generated `CLEMENTINE_API_KEY` — copying one from another host's `.env`
    couples their security boundaries for no reason.
 
-2b. **Setting only `CLEMENTINE_API_KEY`.** The gateway will not see it. The
-   mirrored `API_SERVER_KEY` must carry the same value until upstream Hermes
-   reads the new name.
+2b. **Setting only `CLEMENTINE_API_KEY`.** The patched gateway reads it fine;
+   only on a STOCK upstream host would it be invisible (re-apply the patch
+   or mirror until the rename lands upstream).
 3. **Testing only `127.0.0.1`.** A working `curl` from the host itself does
    not prove the phone can reach it — always verify from the actual network
    path (LAN IP, Tailscale IP, or public URL) before declaring success.
@@ -144,8 +139,6 @@ hand-roll them.
 
 - [ ] `CLEMENTINE_API_ENABLED=true` and a freshly generated `CLEMENTINE_API_KEY` are
       in `~/.hermes/.env`
-- [ ] `API_SERVER_ENABLED` / `API_SERVER_KEY` mirror them with identical
-      values (the names Hermes actually reads)
 - [ ] Gateway restarted after the `.env` edit
 - [ ] `curl .../v1/capabilities` with the bearer key returns 200 from
       `127.0.0.1`
