@@ -132,3 +132,54 @@ describe('createRecorder', () => {
     expect(recorder.level()).toBe(0);
   });
 });
+
+/**
+ * Barge-in metering and a listening turn can both reach for the mic in the
+ * same tick. `recording` is only set after two awaits, so both used to get
+ * past the guard and call prepareToRecordAsync twice — which the native
+ * module rejects with "AudioRecorder has already been prepared".
+ */
+describe('recorder under concurrent starts', () => {
+  const makeNative = () => ({
+    prepareToRecordAsync: jest.fn(async (_options: unknown) => {
+      // Prepare is not instant; the race lives inside this await.
+      await new Promise((r) => setTimeout(r, 5));
+    }),
+    record: jest.fn(),
+    stop: jest.fn(async () => undefined),
+    uri: 'file:///clip.m4a',
+    getStatus: () => ({ metering: -20 }),
+  });
+
+  it('prepares once when started twice at the same moment', async () => {
+    const native = makeNative();
+    const rec = createRecorder(native as unknown as Parameters<typeof createRecorder>[0]);
+
+    await Promise.all([rec.start(), rec.start()]);
+
+    expect(native.prepareToRecordAsync).toHaveBeenCalledTimes(1);
+    expect(native.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('is recording once the concurrent starts settle', async () => {
+    const native = makeNative();
+    const rec = createRecorder(native as unknown as Parameters<typeof createRecorder>[0]);
+
+    await Promise.all([rec.start(), rec.start(), rec.start()]);
+
+    expect(rec.level()).toBeGreaterThan(0);
+  });
+
+  /** A stop that lands mid-prepare must still stop it, not slip past. */
+  it('stops a session that was still preparing', async () => {
+    const native = makeNative();
+    const rec = createRecorder(native as unknown as Parameters<typeof createRecorder>[0]);
+
+    const starting = rec.start();
+    const stopped = rec.stop();
+    await Promise.all([starting, stopped]);
+
+    expect(native.stop).toHaveBeenCalledTimes(1);
+    expect(rec.level()).toBe(0);
+  });
+});

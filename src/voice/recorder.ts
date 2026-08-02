@@ -69,6 +69,16 @@ type AudioRecorderLike = {
 
 export function createRecorder(recorder: AudioRecorderLike): Recorder {
   let recording = false;
+  /**
+   * The in-flight `start()`, if any.
+   *
+   * `recording` only becomes true after two awaits, so two callers in the
+   * same tick — barge-in metering and a listening turn both reaching for the
+   * mic — used to sail past the guard and prepare the native recorder twice,
+   * which it rejects outright. Concurrent starts now share one attempt, and
+   * stop/cancel wait for it rather than slipping past a half-open session.
+   */
+  let starting: Promise<void> | null = null;
 
   return {
     requestPermission: async () => {
@@ -78,21 +88,34 @@ export function createRecorder(recorder: AudioRecorderLike): Recorder {
 
     start: async () => {
       if (recording) return;
-      // Without this Android records through the earpiece route and the
-      // level never rises above room tone.
-      await setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-        // playAndRecord otherwise routes to the earpiece on iOS, which makes
-        // the agent inaudible during the barge-in overlap.
-        shouldRouteThroughEarpiece: false,
-      });
-      await recorder.prepareToRecordAsync(RECORDING_FORMAT);
-      recorder.record();
-      recording = true;
+      if (starting) return starting;
+
+      starting = (async () => {
+        // Without this Android records through the earpiece route and the
+        // level never rises above room tone.
+        await setAudioModeAsync({
+          allowsRecording: true,
+          playsInSilentMode: true,
+          // playAndRecord otherwise routes to the earpiece on iOS, which
+          // makes the agent inaudible during the barge-in overlap.
+          shouldRouteThroughEarpiece: false,
+        });
+        await recorder.prepareToRecordAsync(RECORDING_FORMAT);
+        recorder.record();
+        recording = true;
+      })();
+
+      try {
+        await starting;
+      } finally {
+        starting = null;
+      }
     },
 
     stop: async () => {
+      // A stop landing mid-prepare has to wait for the session to exist,
+      // or it returns null and leaves the mic open forever.
+      if (starting) await starting.catch(() => undefined);
       if (!recording) return null;
       recording = false;
       await recorder.stop();
@@ -102,6 +125,7 @@ export function createRecorder(recorder: AudioRecorderLike): Recorder {
     },
 
     cancel: async () => {
+      if (starting) await starting.catch(() => undefined);
       if (!recording) return;
       recording = false;
       await recorder.stop();
