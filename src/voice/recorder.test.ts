@@ -62,6 +62,20 @@ describe('createRecorder', () => {
     expect(inner.record).toHaveBeenCalled();
   });
 
+  /**
+   * No preset enables metering, and without it `metering` is undefined: the
+   * level reads as permanent silence, so the VAD never hears speech start and
+   * the turn never auto-sends. Nothing else in the chain would look broken.
+   */
+  it('turns metering on, or the VAD is deaf', async () => {
+    const inner = fakeRecorder();
+    await createRecorder(inner).start();
+
+    expect(inner.prepareToRecordAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ isMeteringEnabled: true }),
+    );
+  });
+
   /** Android otherwise records via the earpiece route and never hears anything. */
   it('puts the session in recording mode first, and releases it after', async () => {
     const inner = fakeRecorder();

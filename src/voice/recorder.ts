@@ -34,6 +34,10 @@ const WHISPER_FORMAT = {
   ...RecordingPresets.HIGH_QUALITY,
   sampleRate: 16_000,
   numberOfChannels: 1,
+  // Not in any preset, and without it `getStatus().metering` is undefined —
+  // the level reads as constant silence, the VAD never hears speech start,
+  // and a turn never auto-sends.
+  isMeteringEnabled: true,
 };
 
 /**

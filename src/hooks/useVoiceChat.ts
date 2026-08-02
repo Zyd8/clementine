@@ -195,13 +195,10 @@ export function useVoiceChat(profileId: ProfileId = null) {
   const handleEndOfSpeech = useCallback(async () => {
     if (!connection || inFlight.current) return;
 
-    const transcript = fullTranscript.current.trim();
-    if (!transcript) {
-      enterIdle();
-      return;
-    }
-
-    // Stop ASR, get final transcript
+    // No early bail on an empty `fullTranscript`. A batch provider produces
+    // nothing until `stop()` returns — checking first meant every turn was
+    // abandoned before it was ever transcribed. Only providers that stream
+    // partials populate this before the mic closes.
     try {
       const final = await asrRef.current?.stop();
       if (final) {
@@ -226,6 +223,17 @@ export function useVoiceChat(profileId: ProfileId = null) {
 
   const handleMaxDuration = useCallback(async () => {
     if (!connection || inFlight.current) return;
+
+    // Same as end-of-speech: the clip still has to be transcribed, or hitting
+    // the recording cap silently discards everything the user just said.
+    try {
+      const final = await asrRef.current?.stop();
+      if (final) {
+        fullTranscript.current = final;
+      }
+    } catch {
+      // Fall through with whatever partial text exists.
+    }
 
     asrRef.current = null;
     vadRef.current?.destroy();

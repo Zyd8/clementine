@@ -11,6 +11,23 @@ import { VOICE_PROFILE_DEFAULTS } from '@/types/voice';
 import { useVoiceChat } from './useVoiceChat';
 
 // Mock the runs API (mirrors useChat.test.ts pattern)
+// A recorder that actually yields a clip, so `asr.stop()` reaches the
+// transcription call instead of short-circuiting on a null uri.
+jest.mock('expo-audio', () => ({
+  AudioModule: {
+    requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  },
+  setAudioModeAsync: jest.fn(async () => undefined),
+  RecordingPresets: { HIGH_QUALITY: { extension: '.m4a' } },
+  useAudioRecorder: () => ({
+    prepareToRecordAsync: jest.fn(async () => undefined),
+    record: jest.fn(),
+    stop: jest.fn(async () => undefined),
+    uri: 'file:///clip.m4a',
+    getStatus: () => ({ metering: -20 }),
+  }),
+}));
+
 jest.mock('@/api/runs', () => ({
   createRun: jest.fn(),
   stopRun: jest.fn(),
@@ -60,6 +77,13 @@ beforeEach(() => {
   useChatStore.setState({ byProfile: {} });
   // Reset voice profile to defaults (device TTS, Groq ASR)
   // Groq is the default ASR now and refuses to open the mic without a key.
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({ text: '' }),
+    text: async () => '',
+  }) as unknown as typeof fetch;
+
   useVoiceProfileStore.setState({
     profile: {
       ...VOICE_PROFILE_DEFAULTS,
@@ -110,6 +134,37 @@ describe('useVoiceChat', () => {
   });
 
   describe('end-of-speech → auto-send', () => {
+    /**
+     * Groq returns the whole transcript from `stop()` and nothing before it.
+     * The handler used to check `fullTranscript` first and bail when it was
+     * empty, which abandoned every turn before it was ever transcribed —
+     * invisible to tests that push a partial first, as the ones below do.
+     */
+    it('sends a batch transcript that only exists after stop()', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'spoken only, never streamed' }),
+        text: async () => '',
+      }) as unknown as typeof fetch;
+
+      const { result } = await renderHook(() => useVoiceChat());
+
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      // Deliberately no pushPartialTranscript.
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      expect(mockedCreateRun).toHaveBeenCalledWith(
+        'http://localhost:8642',
+        'test-key',
+        expect.objectContaining({ input: 'spoken only, never streamed' }),
+      );
+    });
+
     it('triggers auto-send on end-of-speech', async () => {
       const { result } = await renderHook(() => useVoiceChat());
 
@@ -203,7 +258,14 @@ describe('useVoiceChat', () => {
 
     it('executes stop_speech_and_run interrupt and re-enters LISTENING', async () => {
       // Set voice profile to stop_speech_and_run before rendering
-      useVoiceProfileStore.setState({
+      global.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({ text: '' }),
+    text: async () => '',
+  }) as unknown as typeof fetch;
+
+  useVoiceProfileStore.setState({
         profile: {
           asr: { provider: 'groq' as const, apiKey: 'test-key' },
           tts: { provider: 'edge' as const },
