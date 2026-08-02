@@ -94,6 +94,17 @@ export function useVoiceChat(profileId: ProfileId = null) {
    * ago; remember it.
    */
   const noiseFloorRef = useRef<number | undefined>(undefined);
+  /**
+   * Who currently owns the microphone.
+   *
+   * Barge-in opens the mic during PLAYING purely to meter, and gives it back
+   * when that effect tears down. But the reply ending starts a listening turn
+   * BEFORE React runs that cleanup, so the cleanup's `cancel()` killed the
+   * recording the new turn had just opened — the agent replied once and never
+   * heard anything again. Each claimant takes a token; a teardown only gives
+   * the mic back if nobody has claimed it since.
+   */
+  const micOwner = useRef(0);
   const fullTranscript = useRef('');
 
   // ---- State transition helpers (update both React state and ref) ----
@@ -333,6 +344,10 @@ export function useVoiceChat(profileId: ProfileId = null) {
   const enterListening = useCallback(async () => {
     if (inFlight.current) return;
 
+    // Claim the mic, so a barge-in teardown still in flight cannot cancel the
+    // recording this turn is about to start.
+    micOwner.current += 1;
+
     transition('LISTENING');
     setLiveTranscript('');
     fullTranscript.current = '';
@@ -532,6 +547,7 @@ export function useVoiceChat(profileId: ProfileId = null) {
   useEffect(() => {
     if (voiceState !== 'PLAYING') return;
 
+    const token = (micOwner.current += 1);
     const detector = createBargeInDetector(speechThreshold);
     // Set before any await, so the cleanup below can tell a barge-in (which
     // hands the mic to enterListening) from an ordinary exit (which must give
@@ -557,7 +573,9 @@ export function useVoiceChat(profileId: ProfileId = null) {
 
     return () => {
       clearInterval(id);
-      if (!barged) void recorder.cancel();
+      // Only give the mic back if this effect still owns it. A listening turn
+      // that started first has already claimed it.
+      if (!barged && micOwner.current === token) void recorder.cancel();
     };
   }, [voiceState, speechThreshold, recorder, interruptPlayback]);
 

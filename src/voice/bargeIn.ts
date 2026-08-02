@@ -32,6 +32,16 @@ export const BARGE_IN_SUSTAIN = 3;
 export const BARGE_IN_CALIBRATION = 5;
 /** How far above the measured echo a voice has to be to count as barging in. */
 export const BARGE_IN_ECHO_MARGIN = 0.15;
+/**
+ * Ceiling on the measured bar.
+ *
+ * Without it, a device whose mic hears its own speaker loudly measures an
+ * echo near the top of the scale, the bar lands above anything a human can
+ * produce, and the reply becomes uninterruptible — trading one failure for a
+ * worse one. Past this point a raised voice must still get through, even at
+ * the cost of the occasional self-interrupt.
+ */
+export const BARGE_IN_CEILING = 0.8;
 
 export type BargeInDetector = {
   /** Feed a level. Returns true the moment a barge-in is confirmed. */
@@ -56,12 +66,14 @@ export function createBargeInDetector(
     sustain = BARGE_IN_SUSTAIN,
     calibration = BARGE_IN_CALIBRATION,
     echoMargin = BARGE_IN_ECHO_MARGIN,
+    ceiling = BARGE_IN_CEILING,
   }: {
     factor?: number;
     minLevel?: number;
     sustain?: number;
     calibration?: number;
     echoMargin?: number;
+    ceiling?: number;
   } = {},
 ): BargeInDetector {
   /** The floor before the echo has been heard. */
@@ -73,7 +85,8 @@ export function createBargeInDetector(
   let run = 0;
   let fired = false;
 
-  const threshold = (): number => Math.max(base, echoPeak + echoMargin);
+  const threshold = (): number =>
+    Math.min(ceiling, Math.max(base, echoPeak + echoMargin));
 
   return {
     push: (level: number): boolean => {

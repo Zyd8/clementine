@@ -1,5 +1,6 @@
 import {
   BARGE_IN_CALIBRATION,
+  BARGE_IN_CEILING,
   BARGE_IN_MIN_LEVEL,
   BARGE_IN_SUSTAIN,
   createBargeInDetector,
@@ -31,12 +32,17 @@ describe('createBargeInDetector', () => {
 
   /**
    * The bug this measurement exists for: the agent heard itself and cut its
-   * own reply off. However loud the echo is, it is the thing being measured,
-   * so it can never clear its own bar.
+   * own reply off. The echo is the thing being measured, so it cannot clear
+   * its own bar.
+   *
+   * The one exception is deliberate: past BARGE_IN_CEILING the bar stops
+   * rising, because a bar above human range would make the reply
+   * uninterruptible — a worse failure than an occasional self-interrupt. A
+   * device that echoes THAT loudly needs echo cancellation, not a threshold.
    */
-  it("never fires on the reply's own echo, however loud it is", () => {
+  it("never fires on the reply's own echo at any realistic level", () => {
     const detector = createBargeInDetector(0.4);
-    expect(feed(detector, 0.85, 60)).toBe(false);
+    expect(feed(detector, 0.6, 60)).toBe(false);
   });
 
   it('still hears a voice over a loud echo', () => {
@@ -116,5 +122,30 @@ describe('createBargeInDetector', () => {
     detector.push(0.9);
     detector.reset();
     expect(detector.push(0.9)).toBe(false);
+  });
+});
+
+/**
+ * A device whose mic hears its own speaker loudly would otherwise measure an
+ * echo near the top of the scale and set a bar no human could clear — trading
+ * a reply that interrupts itself for one that cannot be interrupted at all.
+ */
+describe('createBargeInDetector — staying interruptible', () => {
+  const feed = (detector: ReturnType<typeof createBargeInDetector>, level: number, times: number) => {
+    let fired = false;
+    for (let i = 0; i < times; i++) fired = detector.push(level) || fired;
+    return fired;
+  };
+
+  it('caps the bar so a raised voice always has somewhere to go', () => {
+    const detector = createBargeInDetector(0.4);
+    feed(detector, 0.95, BARGE_IN_CALIBRATION); // a very loud echo
+    expect(detector.threshold()).toBeLessThanOrEqual(BARGE_IN_CEILING);
+  });
+
+  it('still lets a shout through on a device with bad echo', () => {
+    const detector = createBargeInDetector(0.4);
+    feed(detector, 0.95, BARGE_IN_CALIBRATION);
+    expect(feed(detector, 1, BARGE_IN_SUSTAIN)).toBe(true);
   });
 });

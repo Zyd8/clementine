@@ -625,7 +625,9 @@ describe('useVoiceChat', () => {
       });
 
       // A loud but STEADY level: the agent's own voice, never a barge-in.
-      mockMetering = -8;
+      // (Below BARGE_IN_CEILING — past that the bar deliberately stops rising
+      // so the reply cannot become uninterruptible.)
+      mockMetering = -20;
       await act(async () => {
         await new Promise((r) => setTimeout(r, 1500));
       });
@@ -674,6 +676,61 @@ describe('useVoiceChat', () => {
       await waitFor(() => {
         expect(result.current.voiceState).toBe('LISTENING');
       });
+    });
+
+    /**
+     * The regression this guards: barge-in opens the mic during the reply and
+     * gives it back on teardown, but the relisten starts a turn BEFORE React
+     * runs that teardown — so the teardown cancelled the recording the new
+     * turn had just opened, and the agent replied once and went deaf.
+     */
+    it('leaves the mic recording for the turn that follows the reply', async () => {
+      const audio = jest.requireMock('expo-audio') as {
+        useAudioRecorder: () => { record: jest.Mock; stop: jest.Mock };
+      };
+
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'assistant.delta', text: 'Hi.' } as StreamEvent,
+          { type: 'run.completed', output: 'Hi.' } as StreamEvent,
+        ]),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+      await waitFor(() => {
+        expect(result.current.voiceState).toBe('PLAYING');
+      });
+
+      await act(async () => {
+        ttsCallbacks.current?.onAllDone();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await waitFor(() => {
+        expect(result.current.voiceState).toBe('LISTENING');
+      });
+
+      // Give any pending teardown a chance to cancel the new recording.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 300));
+      });
+
+      // The mic must still be live: a level feed reaches the VAD, which is
+      // the only thing that can end the turn.
+      await act(async () => {
+        result.current.pushAudioLevel(0.8);
+      });
+      expect(result.current.voiceState).toBe('LISTENING');
+      void audio;
     });
 
     /** An interrupt mid-reply must win — it must not be relistened over. */
