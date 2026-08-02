@@ -25,6 +25,22 @@ describe('chat store', () => {
     expect(feed()).toEqual([]);
   });
 
+  /**
+   * Selectors run on every getSnapshot. Handing back a freshly allocated
+   * fallback for an untouched profile makes React see a new snapshot each
+   * render — "The result of getSnapshot should be cached to avoid an
+   * infinite loop", and the chat screen spins.
+   */
+  it('returns a referentially stable feed for a profile with no state yet', () => {
+    const untouched = () => useChatStore.getState().feed('never-seen');
+    expect(untouched()).toBe(untouched());
+  });
+
+  it('returns a referentially stable usage for a profile with no state yet', () => {
+    const untouched = () => useChatStore.getState().usage('never-seen');
+    expect(untouched()).toBe(untouched());
+  });
+
   it('appends the user message optimistically — the only optimistic render', () => {
     useChatStore.getState().appendUserMessage(P, 'hello');
     expect(feed()).toMatchObject([{ kind: 'user', text: 'hello' }]);

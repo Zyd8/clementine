@@ -13,6 +13,12 @@ describe('usage store', () => {
     expect(total).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 
+  /** See chat store: a fresh fallback object per call spins useSyncExternalStore. */
+  it('returns a referentially stable total for a profile with no usage yet', () => {
+    const total = () => useUsageStore.getState().total(P);
+    expect(total()).toBe(total());
+  });
+
   it('accumulates usage from a single run', () => {
     useUsageStore.getState().addUsage(P, {
       inputTokens: 10,

@@ -23,7 +23,16 @@ type UsageState = {
   reset: (profileId: ProfileId) => void;
 };
 
-const ZERO: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+/**
+ * Shared, frozen. `total` runs on every getSnapshot, so returning a fresh
+ * `{ ...ZERO }` for a profile with no usage yet makes React see a changed
+ * snapshot every render ("The result of getSnapshot should be cached").
+ */
+const ZERO: TokenUsage = Object.freeze({
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+});
 
 export const useUsageStore = create<UsageState>()(
   persist(
@@ -33,7 +42,7 @@ export const useUsageStore = create<UsageState>()(
       addUsage: (profileId, usage) =>
         set((state) => {
           const key = profileKey(profileId);
-          const prev = state.byProfile[key] ?? { ...ZERO };
+          const prev = state.byProfile[key] ?? ZERO;
           return {
             byProfile: {
               ...state.byProfile,
@@ -48,7 +57,7 @@ export const useUsageStore = create<UsageState>()(
 
       total: (profileId) => {
         const key = profileKey(profileId);
-        return get().byProfile[key] ?? { ...ZERO };
+        return get().byProfile[key] ?? ZERO;
       },
 
       reset: (profileId) =>

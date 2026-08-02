@@ -31,7 +31,11 @@ export type FeedItem =
     }
   | { kind: 'error'; id: string; text: string };
 
-const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+const ZERO_USAGE: TokenUsage = Object.freeze({
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+});
 
 type ProfileState = {
   feed: FeedItem[];
@@ -39,11 +43,23 @@ type ProfileState = {
   activeRun: string | null;
 };
 
-const emptyProfile = (): ProfileState => ({
-  feed: [],
-  usage: { ...ZERO_USAGE },
+/**
+ * One shared instance, not a fresh object per call. Selectors run on every
+ * getSnapshot, so handing back a new fallback for an untouched profile makes
+ * React see a changed snapshot every render and warn "The result of
+ * getSnapshot should be cached to avoid an infinite loop".
+ *
+ * Safe to share because every writer below rebuilds state with spreads —
+ * nothing mutates a ProfileState or its feed in place. Frozen so that stays
+ * true.
+ */
+const EMPTY_PROFILE: ProfileState = Object.freeze({
+  feed: Object.freeze([] as FeedItem[]) as FeedItem[],
+  usage: ZERO_USAGE,
   activeRun: null,
 });
+
+const emptyProfile = (): ProfileState => EMPTY_PROFILE;
 
 let counter = 0;
 const nextId = () => `item_${(counter += 1)}`;
