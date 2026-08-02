@@ -27,26 +27,62 @@ const sseResponse = (chunks: string[]) =>
     { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
   );
 
+// WireSession shape from the real Hermes API
+const WIRE_SESSION_1 = {
+  id: 'sess_1',
+  source: 'chat',
+  user_id: 'user_1',
+  model: 'deepseek-v4-pro',
+  title: 'Debug auth',
+  started_at: '2026-08-01T12:00:00Z',
+  ended_at: '',
+  end_reason: '',
+  message_count: 5,
+  tool_call_count: 3,
+  input_tokens: 500,
+  output_tokens: 1200,
+  cache_read_tokens: 0,
+  cache_write_tokens: 0,
+  reasoning_tokens: 0,
+  estimated_cost_usd: 0.002,
+  actual_cost_usd: 0.002,
+  api_call_count: 1,
+  parent_session_id: '',
+  has_system_prompt: false,
+  has_model_config: false,
+};
+
+const WIRE_SESSION_2 = {
+  id: 'sess_2',
+  source: 'chat',
+  user_id: 'user_1',
+  model: 'deepseek-v4-pro',
+  title: 'Setup cron',
+  started_at: '2026-08-02T09:00:00Z',
+  ended_at: '',
+  end_reason: '',
+  message_count: 12,
+  tool_call_count: 7,
+  input_tokens: 800,
+  output_tokens: 2500,
+  cache_read_tokens: 0,
+  cache_write_tokens: 0,
+  reasoning_tokens: 100,
+  estimated_cost_usd: 0.005,
+  actual_cost_usd: 0.005,
+  api_call_count: 2,
+  parent_session_id: 'sess_1',
+  has_system_prompt: true,
+  has_model_config: false,
+};
+
 describe('listSessions', () => {
   const mockList = {
-    sessions: [
-      {
-        id: 'sess_1',
-        title: 'Debug auth',
-        preview: 'What is the error in the logs?',
-        last_message_at: '2026-08-01T12:00:00Z',
-        message_count: 5,
-      },
-      {
-        id: 'sess_2',
-        title: 'Setup cron',
-        preview: 'Help me configure cron jobs',
-        last_message_at: '2026-08-02T09:00:00Z',
-        message_count: 12,
-        parent_id: 'sess_1',
-        branch_index: 1,
-      },
-    ],
+    object: 'list',
+    data: [WIRE_SESSION_1, WIRE_SESSION_2],
+    limit: 50,
+    offset: 0,
+    has_more: false,
   };
 
   beforeEach(() => {
@@ -61,32 +97,44 @@ describe('listSessions', () => {
     expect(url).toContain('offset=0');
   });
 
-  it('normalises snake_case into camelCase', async () => {
+  it('reads sessions from body.data (real Hermes shape)', async () => {
+    const result = await listSessions(BASE, KEY, { limit: 10, offset: 0 });
+    expect(result.sessions).toHaveLength(2);
+  });
+
+  it('normalises snake_case wire fields into camelCase', async () => {
     const result = await listSessions(BASE, KEY, { limit: 10, offset: 0 });
     expect(result.sessions[0]).toMatchObject({
       id: 'sess_1',
       title: 'Debug auth',
-      preview: 'What is the error in the logs?',
-      lastMessageAt: '2026-08-01T12:00:00Z',
       messageCount: 5,
     });
   });
 
-  it('preserves lineage fields for forked sessions', async () => {
+  it('maps started_at to lastMessageAt', async () => {
+    const result = await listSessions(BASE, KEY, { limit: 10, offset: 0 });
+    expect(result.sessions[0]!.lastMessageAt).toBe('2026-08-01T12:00:00Z');
+  });
+
+  it('maps parent_session_id to parentId when non-empty', async () => {
     const result = await listSessions(BASE, KEY, { limit: 10, offset: 0 });
     expect(result.sessions[1]).toMatchObject({
       parentId: 'sess_1',
-      branchIndex: 1,
     });
   });
 
-  it('omits lineage fields when absent', async () => {
+  it('omits parentId when parent_session_id is empty', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
-      json({ sessions: [{ id: 'sess_1', title: 'x', last_message_at: 'Z', message_count: 1 }] }),
+      json({ object: 'list', data: [WIRE_SESSION_1], limit: 50, offset: 0, has_more: false }),
     );
     const result = await listSessions(BASE, KEY, { limit: 10, offset: 0 });
     expect(result.sessions[0]).not.toHaveProperty('parentId');
-    expect(result.sessions[0]).not.toHaveProperty('branchIndex');
+  });
+
+  it('falls back to empty string when preview-generating fields are absent', async () => {
+    // Real Hermes has no preview field; preview always defaults to ''
+    const result = await listSessions(BASE, KEY, { limit: 10, offset: 0 });
+    expect(result.sessions[0]!.preview).toBe('');
   });
 
   it('maps a 401 to an auth error', async () => {
@@ -95,20 +143,36 @@ describe('listSessions', () => {
       kind: 'auth',
     });
   });
-
-  it('falls back to empty string when preview is absent', async () => {
-    (global.fetch as jest.Mock).mockResolvedValue(
-      json({ sessions: [{ id: 'sess_1', title: 'x', last_message_at: 'Z', message_count: 0 }] }),
-    );
-    const result = await listSessions(BASE, KEY, { limit: 10, offset: 0 });
-    expect(result.sessions[0]!.preview).toBe('');
-  });
 });
 
 describe('createSession', () => {
+  const WIRE_SESSION_NEW = {
+    id: 'sess_new',
+    source: 'chat',
+    user_id: 'user_1',
+    model: 'deepseek-v4-pro',
+    title: 'Untitled',
+    started_at: '2026-08-02T10:00:00Z',
+    ended_at: '',
+    end_reason: '',
+    message_count: 0,
+    tool_call_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    reasoning_tokens: 0,
+    estimated_cost_usd: 0,
+    actual_cost_usd: 0,
+    api_call_count: 0,
+    parent_session_id: '',
+    has_system_prompt: false,
+    has_model_config: false,
+  };
+
   beforeEach(() => {
     global.fetch = jest.fn().mockResolvedValue(
-      json({ id: 'sess_new', title: 'Untitled', last_message_at: 'Z', message_count: 0 }),
+      json({ object: 'hermes.session', session: WIRE_SESSION_NEW }),
     ) as never;
   });
 
@@ -117,21 +181,40 @@ describe('createSession', () => {
     expect((global.fetch as jest.Mock).mock.calls[0][0]).toBe(`${BASE}/api/sessions`);
   });
 
-  it('sends an optional title', async () => {
+  it('always sends a JSON body (even {} when no title)', async () => {
+    await createSession(BASE, KEY);
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(init.body).toBe('{}');
+    expect(init.method).toBe('POST');
+  });
+
+  it('sends a title when provided', async () => {
     await createSession(BASE, KEY, { title: 'My Session' });
     const [, init] = (global.fetch as jest.Mock).mock.calls[0];
     expect(JSON.parse(init.body)).toEqual({ title: 'My Session' });
   });
 
-  it('returns the created session summary', async () => {
+  it('reads the created session from body.session (real envelope)', async () => {
     const result = await createSession(BASE, KEY);
     expect(result).toMatchObject({ id: 'sess_new', title: 'Untitled', messageCount: 0 });
+  });
+
+  it('returns the created session summary', async () => {
+    const result = await createSession(BASE, KEY, { title: 'Titled' });
+    expect(result).toMatchObject({ id: 'sess_new', title: 'Untitled', messageCount: 0 });
+  });
+
+  it('rejects with auth error on 401', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue(json({}, 401));
+    await expect(createSession(BASE, KEY)).rejects.toMatchObject({ kind: 'auth' });
   });
 });
 
 describe('getSessionMessages', () => {
   const mockMessages = {
-    messages: [
+    object: 'list',
+    session_id: 'sess_1',
+    data: [
       { role: 'user', content: 'hello', timestamp: '2026-08-01T12:00:00Z' },
       { role: 'assistant', content: 'Hi there!', timestamp: '2026-08-01T12:00:01Z' },
       {
@@ -155,6 +238,11 @@ describe('getSessionMessages', () => {
     );
   });
 
+  it('reads messages from body.data (real Hermes shape)', async () => {
+    const result = await getSessionMessages(BASE, KEY, 'sess_1');
+    expect(result.messages).toHaveLength(3);
+  });
+
   it('returns parsed messages with all fields', async () => {
     const result = await getSessionMessages(BASE, KEY, 'sess_1');
     expect(result.messages).toHaveLength(3);
@@ -164,16 +252,33 @@ describe('getSessionMessages', () => {
 });
 
 describe('forkSession', () => {
+  const WIRE_FORKED = {
+    id: 'sess_forked',
+    source: 'chat',
+    user_id: 'user_1',
+    model: 'deepseek-v4-pro',
+    title: 'Debug auth',
+    started_at: '2026-08-02T11:00:00Z',
+    ended_at: '',
+    end_reason: '',
+    message_count: 0,
+    tool_call_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    reasoning_tokens: 0,
+    estimated_cost_usd: 0,
+    actual_cost_usd: 0,
+    api_call_count: 0,
+    parent_session_id: 'sess_1',
+    has_system_prompt: true,
+    has_model_config: false,
+  };
+
   beforeEach(() => {
     global.fetch = jest.fn().mockResolvedValue(
-      json({
-        id: 'sess_forked',
-        title: 'Debug auth',
-        parent_id: 'sess_1',
-        branch_index: 2,
-        last_message_at: 'Z',
-        message_count: 0,
-      }),
+      json({ object: 'hermes.session', session: WIRE_FORKED }),
     ) as never;
   });
 
@@ -184,13 +289,28 @@ describe('forkSession', () => {
     );
   });
 
+  it('always sends a JSON body ({} required, 400 without)', async () => {
+    await forkSession(BASE, KEY, 'sess_1');
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(init.body).toBe('{}');
+    expect(init.method).toBe('POST');
+  });
+
+  it('reads the forked session from body.session (real envelope)', async () => {
+    const result = await forkSession(BASE, KEY, 'sess_1');
+    expect(result).toMatchObject({
+      id: 'sess_forked',
+      title: 'Debug auth',
+      parentId: 'sess_1',
+    });
+  });
+
   it('returns the forked session with lineage', async () => {
     const result = await forkSession(BASE, KEY, 'sess_1');
     expect(result).toMatchObject({
       id: 'sess_forked',
       title: 'Debug auth',
       parentId: 'sess_1',
-      branchIndex: 2,
     });
   });
 });

@@ -19,14 +19,29 @@ import { createSseParser } from './sse';
 
 export type { SessionMessage, SessionSummary } from '@/types/sessions';
 
+// Mirror of the real Hermes WireSession shape (live-verified).
 type WireSession = {
   id: string;
+  source: string;
+  user_id: string;
+  model: string;
   title: string;
-  preview?: string;
-  last_message_at: string;
+  started_at: string;
+  ended_at: string;
+  end_reason: string;
   message_count: number;
-  parent_id?: string;
-  branch_index?: number;
+  tool_call_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+  estimated_cost_usd: number;
+  actual_cost_usd: number;
+  api_call_count: number;
+  parent_session_id: string;
+  has_system_prompt: boolean;
+  has_model_config: boolean;
 };
 
 type WireMessage = {
@@ -42,11 +57,10 @@ function normalizeSession(w: WireSession): SessionSummary {
   return {
     id: w.id,
     title: w.title,
-    preview: w.preview ?? '',
-    lastMessageAt: w.last_message_at,
+    preview: '',
+    lastMessageAt: w.started_at,
     messageCount: w.message_count,
-    ...(w.parent_id === undefined ? {} : { parentId: w.parent_id }),
-    ...(w.branch_index === undefined ? {} : { branchIndex: w.branch_index }),
+    ...(w.parent_session_id ? { parentId: w.parent_session_id } : {}),
   };
 }
 
@@ -69,10 +83,10 @@ export async function listSessions(
   { limit, offset }: { limit: number; offset: number },
 ): Promise<SessionsList> {
   const client = makeClient(baseUrl, credential);
-  const body = await client.get<{ sessions: WireSession[] }>(
+  const body = await client.get<{ data: WireSession[] }>(
     `/api/sessions?limit=${limit}&offset=${offset}`,
   );
-  return { sessions: body.sessions.map(normalizeSession) };
+  return { sessions: body.data.map(normalizeSession) };
 }
 
 export async function createSession(
@@ -80,11 +94,11 @@ export async function createSession(
   credential: string,
   { title }: { title?: string } = {},
 ): Promise<SessionSummary> {
-  const body = await makeClient(baseUrl, credential).post<WireSession>(
-    '/api/sessions',
-    title ? { title } : undefined,
-  );
-  return normalizeSession(body);
+  const body = await makeClient(baseUrl, credential).post<{
+    object: string;
+    session: WireSession;
+  }>('/api/sessions', title ? { title } : {});
+  return normalizeSession(body.session);
 }
 
 export async function getSessionMessages(
@@ -92,10 +106,12 @@ export async function getSessionMessages(
   credential: string,
   sessionId: string,
 ): Promise<{ messages: SessionMessage[] }> {
-  const body = await makeClient(baseUrl, credential).get<{ messages: WireMessage[] }>(
-    `/api/sessions/${sessionId}/messages`,
-  );
-  return { messages: body.messages.map(normalizeMessage) };
+  const body = await makeClient(baseUrl, credential).get<{
+    object: string;
+    session_id: string;
+    data: WireMessage[];
+  }>(`/api/sessions/${sessionId}/messages`);
+  return { messages: body.data.map(normalizeMessage) };
 }
 
 export async function forkSession(
@@ -103,10 +119,11 @@ export async function forkSession(
   credential: string,
   sessionId: string,
 ): Promise<SessionSummary> {
-  const body = await makeClient(baseUrl, credential).post<WireSession>(
-    `/api/sessions/${sessionId}/fork`,
-  );
-  return normalizeSession(body);
+  const body = await makeClient(baseUrl, credential).post<{
+    object: string;
+    session: WireSession;
+  }>(`/api/sessions/${sessionId}/fork`, {});
+  return normalizeSession(body.session);
 }
 
 /**
