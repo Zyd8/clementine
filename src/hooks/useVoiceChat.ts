@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/react-native';
-import { useCallback, useRef, useState } from 'react';
+import { RecordingPresets, useAudioRecorder } from 'expo-audio';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { createRun, stopRun, streamRunEvents } from '@/api/runs';
 import { useChatStore, type ProfileId } from '@/stores/chat';
@@ -8,6 +9,7 @@ import { useUsageStore } from '@/stores/usage';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
 import type { VoiceChatState } from '@/types/voice';
 import { createAsrProvider, type AsrProvider } from '@/voice/asr';
+import { createRecorder, type Recorder } from '@/voice/recorder';
 import { executeInterrupt } from '@/voice/interrupt';
 import { createSentenceBuffer, type SentenceBuffer } from '@/voice/sentenceBuffer';
 import { createTtsProvider, type TtsProvider } from '@/voice/tts';
@@ -38,6 +40,12 @@ export function useVoiceChat(profileId: ProfileId = null) {
   const [voiceState, setVoiceState] = useState<VoiceChatState>('IDLE');
   const [liveTranscript, setLiveTranscript] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
+
+  // One recorder for the hook's lifetime. `useAudioRecorder` owns the native
+  // handle; the adapter around it is what the ASR provider talks to. Lazy
+  // state rather than a ref, because a ref may not be written during render.
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const [recorder] = useState<Recorder>(() => createRecorder(audioRecorder as never));
 
   // Refs for mutable state that doesn't trigger re-renders and avoids
   // stale closures in async callbacks.
@@ -242,7 +250,7 @@ export function useVoiceChat(profileId: ProfileId = null) {
     fullTranscript.current = '';
 
     // Create ASR provider from the voice profile
-    const asr = createAsrProvider(voiceProfile.asr);
+    const asr = createAsrProvider(voiceProfile.asr, recorder);
     asrRef.current = asr;
 
     // Create VAD client
@@ -363,6 +371,24 @@ export function useVoiceChat(profileId: ProfileId = null) {
       vadRef.current.pushLevel(level);
     }
   }, []);
+
+  /**
+   * Poll the mic while listening.
+   *
+   * The VAD is a pure state model — it decides end-of-speech from a level
+   * feed and can only do that if something feeds it. Nothing did, so silence
+   * detection never fired and a turn never auto-sent. 100ms is fine grained
+   * enough for a ~900ms silence timeout without waking the JS thread hard.
+   */
+  useEffect(() => {
+    if (voiceState !== 'LISTENING') return;
+
+    const id = setInterval(() => {
+      pushAudioLevel(recorder.level());
+    }, 100);
+
+    return () => clearInterval(id);
+  }, [voiceState, pushAudioLevel, recorder]);
 
   return {
     voiceState,

@@ -1,5 +1,20 @@
 import { createAsrProvider, type AsrProvider, type AsrResult } from '@/voice/asr';
 
+// The native module cannot load under Jest; the contract above it is what
+// these tests are about.
+jest.mock('whisper.rn/index', () => ({
+  initWhisper: jest.fn().mockResolvedValue({
+    transcribe: () => ({
+      promise: Promise.resolve({ result: '  hello from the device  ' }),
+    }),
+  }),
+}));
+
+jest.mock('./whisperModel', () => ({
+  ensureModel: jest.fn().mockResolvedValue('file:///model.bin'),
+}));
+
+
 /**
  * A fake ASR provider for testing. Returns pre-scripted transcripts with
  * controllable timing — no real audio hardware.
@@ -60,25 +75,70 @@ describe('ASR provider interface', () => {
 
   // ---- whisper_cpp provider methods ----
 
-  describe('whisper_cpp provider', () => {
-    it('start initializes without error', async () => {
-      const provider = createAsrProvider({ provider: 'whisper_cpp' });
-      const onT = jest.fn();
-      await expect(provider.start(onT)).resolves.toBeUndefined();
+  describe('whisper_cpp provider — on-device, no key, no network', () => {
+    const recorder = () => ({
+      requestPermission: jest.fn().mockResolvedValue(true),
+      start: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue('file:///clip.wav'),
+      cancel: jest.fn().mockResolvedValue(undefined),
+      level: jest.fn().mockReturnValue(0),
     });
 
-    it('stop returns empty string (stub)', async () => {
-      const provider = createAsrProvider({ provider: 'whisper_cpp' });
-      const result = await provider.stop();
-      expect(result).toBe('');
+    it('asks for the mic and opens it', async () => {
+      const mic = recorder();
+      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+
+      await provider.start(jest.fn());
+      expect(mic.requestPermission).toHaveBeenCalled();
+      expect(mic.start).toHaveBeenCalled();
     });
 
-    it('cancel resets state', async () => {
-      const provider = createAsrProvider({ provider: 'whisper_cpp' });
+    /** Recording into a denied mic yields silence and a baffling empty turn. */
+    it('refuses to record when the user denies the mic', async () => {
+      const mic = recorder();
+      mic.requestPermission.mockResolvedValue(false);
+      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+
+      await expect(provider.start(jest.fn())).rejects.toThrow(/permission/i);
+      expect(mic.start).not.toHaveBeenCalled();
+    });
+
+    it('transcribes the clip on device and returns the text', async () => {
+      const mic = recorder();
+      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+      const onTranscript = jest.fn();
+
+      await provider.start(onTranscript);
+      await expect(provider.stop()).resolves.toBe('hello from the device');
+      expect(onTranscript).toHaveBeenCalledWith({
+        transcript: 'hello from the device',
+        isPartial: false,
+      });
+    });
+
+    it('yields nothing when the recorder captured no clip', async () => {
+      const mic = recorder();
+      mic.stop.mockResolvedValue(null);
+      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+
+      await provider.start(jest.fn());
+      await expect(provider.stop()).resolves.toBe('');
+    });
+
+    it('discards the recording on cancel and reports no transcript', async () => {
+      const mic = recorder();
+      const provider = createAsrProvider({ provider: 'whisper_cpp' }, mic);
+
+      await provider.start(jest.fn());
       await provider.cancel();
-      // stop after cancel returns empty
-      const result = await provider.stop();
-      expect(result).toBe('');
+      expect(mic.cancel).toHaveBeenCalled();
+      await expect(provider.stop()).resolves.toBe('');
+    });
+
+    /** Better a clear error than silently recording into nothing. */
+    it('says so when constructed without a recorder', async () => {
+      const provider = createAsrProvider({ provider: 'whisper_cpp' });
+      await expect(provider.start(jest.fn())).rejects.toThrow(/recorder/i);
     });
   });
 

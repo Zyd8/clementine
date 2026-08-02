@@ -1,6 +1,13 @@
 import * as Sentry from '@sentry/react-native';
+// `whisper.rn/index`, not `whisper.rn`: the package's exports map defines
+// only `./*` subpaths with no `.` entry, so the bare specifier fails under
+// bundler resolution. Metro resolves both; TypeScript resolves only this one.
+import { initWhisper, type WhisperContext } from 'whisper.rn/index';
 
 import type { AsrProviderConfig } from '@/types/voice';
+
+import type { Recorder } from './recorder';
+import { ensureModel } from './whisperModel';
 
 /**
  * ASR (Automatic Speech Recognition) provider interface.
@@ -13,9 +20,9 @@ import type { AsrProviderConfig } from '@/types/voice';
  * implementations and real native bindings (whisper.cpp RN, etc.) plug in
  * behind the same contract.
  *
- * NOTE: whisper.cpp native binding and streaming ASR packages
- * (react-native-whisper, react-native-deepgram, etc.) are NOT installed —
- * only the interface contract and its tests. See the final report.
+ * `whisper_cpp` is implemented against whisper.rn and runs entirely
+ * on-device: no key, no network, nothing leaves the phone. The BYO cloud
+ * providers remain interface-only.
  */
 
 export type AsrResult = {
@@ -44,12 +51,16 @@ export interface AsrProvider {
 /**
  * Create the ASR provider for the given config.
  *
- * Falls back to a no-op provider when the platform binding is not available.
+ * `whisper_cpp` needs a recorder to capture from; the cloud providers are
+ * still interface-only and ignore it.
  */
-export function createAsrProvider(config: AsrProviderConfig): AsrProvider {
+export function createAsrProvider(
+  config: AsrProviderConfig,
+  recorder?: Recorder,
+): AsrProvider {
   switch (config.provider) {
     case 'whisper_cpp':
-      return createWhisperCppProvider();
+      return createWhisperCppProvider(recorder);
     case 'groq':
       return createGroqProvider(config.apiKey ?? '');
     case 'deepgram':
@@ -61,29 +72,77 @@ export function createAsrProvider(config: AsrProviderConfig): AsrProvider {
 
 // ---- whisper.cpp (free default, on-device) ----
 
-function createWhisperCppProvider(): AsrProvider {
+/**
+ * The loaded model, kept for the process lifetime.
+ *
+ * Initialising a context reads ~75MB off disk and costs seconds; doing it per
+ * utterance would put that in front of every single turn.
+ */
+let sharedContext: WhisperContext | null = null;
+
+async function whisperContext(): Promise<WhisperContext> {
+  if (sharedContext) return sharedContext;
+  const filePath = await ensureModel();
+  sharedContext = await initWhisper({ filePath });
+  return sharedContext;
+}
+
+function createWhisperCppProvider(recorder?: Recorder): AsrProvider {
   let cancelled = false;
+  let sink: ((result: AsrResult) => void) | null = null;
+
+  const requireRecorder = (): Recorder => {
+    if (!recorder) {
+      throw new Error('On-device whisper.cpp ASR needs a recorder to capture from.');
+    }
+    return recorder;
+  };
 
   return {
-    start: async (
-      cb: (result: AsrResult) => void,
-    ): Promise<void> => {
-      // cb is the transcript sink. The interface contract is testable via
-      // the mock; the real whisper.cpp binding (react-native-whisper) is
-      // not installed, so transcripts are not produced yet.
-      void cb;
+    start: async (onTranscript): Promise<void> => {
       cancelled = false;
+      sink = onTranscript;
+      const mic = requireRecorder();
+
+      if (!(await mic.requestPermission())) {
+        const err = new Error('Microphone permission denied.');
+        Sentry.captureException(err, { tags: { reason: 'voice' } });
+        throw err;
+      }
+
+      // Warm the context while the user is still speaking, so the wait after
+      // they stop is inference only, not a 75MB model load as well.
+      void whisperContext().catch((error: unknown) => {
+        Sentry.captureException(error, { tags: { reason: 'voice' } });
+      });
+
+      await mic.start();
     },
 
     stop: async (): Promise<string> => {
-      if (cancelled) return '';
-      // Real implementation: stop the mic and run inference.
-      // TODO: wire real whisper.cpp binding.
-      return '';
+      const mic = requireRecorder();
+      const clip = await mic.stop();
+      if (cancelled || !clip) return '';
+
+      try {
+        const context = await whisperContext();
+        // `language: 'en'` because the bundled weights are the English-only
+        // build; asking it to detect would cost time for nothing.
+        const { promise } = context.transcribe(clip, { language: 'en' });
+        const { result } = await promise;
+        const transcript = result.trim();
+        if (transcript) sink?.({ transcript, isPartial: false });
+        return transcript;
+      } catch (error) {
+        Sentry.captureException(error, { tags: { reason: 'voice' } });
+        throw error;
+      }
     },
 
     cancel: async (): Promise<void> => {
       cancelled = true;
+      sink = null;
+      await recorder?.cancel();
     },
   };
 }

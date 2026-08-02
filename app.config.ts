@@ -33,7 +33,20 @@ const config: ExpoConfig = {
       },
     },
   },
-  plugins: ['expo-router', 'expo-secure-store'],
+  plugins: [
+    'expo-router',
+    'expo-secure-store',
+    // Declares RECORD_AUDIO on Android and the microphone usage string on
+    // iOS. whisper.rn has no config plugin of its own, so the recorder's
+    // plugin is what makes the mic reachable at all.
+    [
+      'expo-audio',
+      {
+        microphonePermission:
+          'Clementine uses the microphone for voice mode. Speech is transcribed on-device and never leaves the phone.',
+      },
+    ],
+  ],
   experiments: { typedRoutes: true },
   extra: { variant },
 };
