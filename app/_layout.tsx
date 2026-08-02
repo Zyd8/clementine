@@ -1,11 +1,12 @@
 import { useFonts } from 'expo-font';
-import { Stack, router } from 'expo-router';
+import { Stack, router, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { View } from 'react-native';
 
 import { useTheme } from '@/hooks/useTheme';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
+import { redirectTarget } from '@/utils/routeGuard';
 import { initTelemetry } from '@/utils/telemetry';
 
 initTelemetry({ dsn: process.env.EXPO_PUBLIC_SENTRY_DSN });
@@ -21,6 +22,9 @@ export default function RootLayout() {
     'JetBrainsMono-Bold': require('../assets/fonts/JetBrainsMono-Bold.ttf'),
   });
 
+  const segments = useSegments();
+  const rootSegment = segments[0];
+
   const hydrateSettings = useSettingsStore((s) => s.hydrate);
   const hydrateConnection = useConnectionStore((s) => s.hydrate);
   const hydrated = useConnectionStore((s) => s.hydrated);
@@ -32,10 +36,19 @@ export default function RootLayout() {
   }, [hydrateSettings, hydrateConnection]);
 
   // First launch with no stored connection lands on setup automatically.
+  //
+  // Gated on `fontsLoaded` too, because that is what decides whether the
+  // <Stack> below is mounted — navigating while it is not writes to
+  // expo-router's navigation store with nothing to receive it. The target is
+  // computed rather than always replaced so a route that is already correct
+  // schedules no navigation at all; replacing unconditionally re-renders this
+  // layout, which re-runs the effect, until React aborts with "Maximum update
+  // depth exceeded".
   useEffect(() => {
-    if (!hydrated) return;
-    router.replace(connection ? '/' : '/setup');
-  }, [hydrated, connection]);
+    if (!hydrated || !fontsLoaded) return;
+    const target = redirectTarget({ hasConnection: connection !== null, rootSegment });
+    if (target) router.replace(target);
+  }, [hydrated, fontsLoaded, connection, rootSegment]);
 
   // Hold a blank canvas until hydration settles and the font is in memory,
   // rather than flashing the wrong screen, the wrong theme, or a frame of
