@@ -28,9 +28,22 @@ type BubbleProps = {
 
 const MEDIA_RE = /MEDIA:(\S+)/g;
 
-/** A bare http(s) URL that looks like an image (jpeg/png/gif/webp/avif). */
+/** A bare http(s) URL that looks like an image: image extension, or a known
+ *  image host that serves extension-less URLs (picsum, unsplash, imgur). */
 const IMAGE_URL_RE =
-  /https?:\/\/\S+\.(?:jpe?g|png|gif|webp|avif)(?:[?#]\S*)?/gi;
+  /https?:\/\/\S+\.(?:jpe?g|png|gif|webp|avif)(?:[?#]\S*)?|https?:\/\/(?:[a-z0-9-]+\.)*(?:picsum\.photos|images\.unsplash\.com|i\.imgur\.com|imgur\.com)\/\S+/gi;
+
+/** Hosts that serve images at extension-less URLs (content-type sniffed). */
+const IMAGE_HOST_RE =
+  /^(?:[a-z0-9-]+\.)*(?:picsum\.photos|images\.unsplash\.com|i\.imgur\.com|imgur\.com)$/i;
+
+/** The phone can display any http(s) URL — images are sniffed by content-type. */
+function looksLikeImageUrl(target: string): boolean {
+  if (!/^https?:\/\//i.test(target)) return false;
+  const hostMatch = target.match(/^https?:\/\/([^/]+)/i);
+  if (hostMatch && IMAGE_HOST_RE.test(hostMatch[1]!)) return true;
+  return /\.(?:jpe?g|png|gif|webp|avif)(?:[?#]|$)/i.test(target);
+}
 
 /**
  * Full media split: MEDIA: tags first, then bare image URLs inside any
@@ -129,12 +142,12 @@ export function Bubble({ role, text, streaming, avatar, testID }: BubbleProps) {
         paddingVertical: theme.spacing.sm,
       }}
     >
-      {role === 'assistant' && /MEDIA:\S+|https?:\/\/\S+\.(?:jpe?g|png|gif|webp|avif)/i.test(text) && !streaming ? (
+      {role === 'assistant' && /MEDIA:\S+|https?:\/\/\S+/.test(text) && !streaming ? (
         <View style={{ gap: theme.spacing.sm }}>
           {splitMediaSegments(text).map((segment, i) => {
             if ('media' in segment && typeof segment.media === 'string') {
               const mediaTarget = segment.media;
-              return isHttpUrl(mediaTarget) ? (
+              return looksLikeImageUrl(mediaTarget) ? (
                 <Image
                   key={i}
                   accessibilityLabel={`Image: ${basename(mediaTarget)}`}
@@ -150,6 +163,20 @@ export function Bubble({ role, text, streaming, avatar, testID }: BubbleProps) {
                     width: 260,
                   }}
                 />
+              ) : isHttpUrl(mediaTarget) ? (
+                // A plain http(s) URL that isn't image-like (a webpage, an
+                // API link...) — render it as text, not as a broken image.
+                <Text
+                  key={i}
+                  style={{
+                    color: theme.colors.gold,
+                    fontFamily: theme.typography.mono.fontFamily,
+                    fontSize: theme.typography.mono.fontSize,
+                    textDecorationLine: 'underline',
+                  }}
+                >
+                  {mediaTarget}
+                </Text>
               ) : (
                 <Text
                   key={i}

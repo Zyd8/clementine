@@ -135,4 +135,23 @@ describe('Bubble', () => {
     expect(img.props.source).toEqual({ uri: 'https://picsum.photos/800/500.jpg' });
     expect(screen.getByText(/Here is the image:/)).toBeTruthy();
   });
+
+  it('renders an extension-less URL from a known image host (picsum)', async () => {
+    await render(
+      <Bubble role="assistant" text={'Here you go: https://picsum.photos/800/600'} />,
+    );
+    const img = screen.getByLabelText('Image: 600');
+    expect(img).toBeTruthy();
+    expect(img.props.source).toEqual({ uri: 'https://picsum.photos/800/600' });
+    expect(screen.getByText(/Here you go:/)).toBeTruthy();
+  });
+
+  it('renders a non-image URL as plain text, not a broken image', async () => {
+    await render(
+      <Bubble role="assistant" text={'Docs: https://example.com/page'} />,
+    );
+    // The full text (with the URL inline) renders as text — no Image element.
+    expect(screen.getByText(/Docs: https:\/\/example\.com\/page/)).toBeTruthy();
+    expect(screen.queryByLabelText(/Image:/)).toBeNull();
+  });
 });
