@@ -35,6 +35,13 @@ import { createVadClient, type VadClient, type VadCallbacks } from '@/voice/vad'
  * not at creation time.
  */
 
+/**
+ * How long voice mode waits for the model's first token before speaking a
+ * thinking filler. Long enough that a fast reply ("hi", no tools) answers
+ * with no filler in front of it; short enough to still cover a slow model.
+ */
+export const THINKING_FILLER_DELAY_MS = 1200;
+
 export function useVoiceChat(profileId: ProfileId = null) {
   const connection = useConnectionStore((s) => s.connection);
   const voiceProfile = useVoiceProfileStore((s) => s.profile);
@@ -162,6 +169,16 @@ export function useVoiceChat(profileId: ProfileId = null) {
 
       const { baseUrl, apiKey } = connection;
       let runId: string | undefined;
+      // The thinking filler is armed, not spoken immediately — see the
+      // arming site inside the try. Cancelled the moment the wait is over
+      // (first content, a tool call, or the run ending).
+      let thinkingFillerTimer: ReturnType<typeof setTimeout> | undefined;
+      const cancelThinkingFiller = () => {
+        if (thinkingFillerTimer) {
+          clearTimeout(thinkingFillerTimer);
+          thinkingFillerTimer = undefined;
+        }
+      };
 
       try {
         // Continues whatever session chat is already in, and vice versa —
@@ -219,16 +236,24 @@ export function useVoiceChat(profileId: ProfileId = null) {
         ttsRef.current = tts;
         sentenceBufRef.current.reset();
 
-        // Fills the silence between the mic closing and the reply actually
-        // starting — otherwise the wait for the model's first token (often
-        // the single longest gap in the whole turn) is dead air. Once per
-        // turn, varied wording — see toolNarration.ts.
-        void tts.speak(pickThinkingFiller()).catch((err) => {
-          Sentry.captureException(
-            err instanceof Error ? err : new Error(String(err)),
-            { tags: { reason: 'voice' } },
-          );
-        });
+        // Fill the silence between the mic closing and the reply actually
+        // starting — the wait for the model's first token is often the
+        // single longest gap in the whole turn. But armed, not spoken
+        // immediately: for a fast reply ("hi", no tools) the filler would
+        // land right on top of the answer, which is jarring. So it only
+        // fires if nothing has arrived within THINKING_FILLER_DELAY_MS, and
+        // the first sentence — or a tool call, which speaks its own line —
+        // cancels it. Once per turn, varied wording — see toolNarration.ts.
+        thinkingFillerTimer = setTimeout(() => {
+          if (stateRef.current === 'PROCESSING') {
+            void tts.speak(pickThinkingFiller()).catch((err) => {
+              Sentry.captureException(
+                err instanceof Error ? err : new Error(String(err)),
+                { tags: { reason: 'voice' } },
+              );
+            });
+          }
+        }, THINKING_FILLER_DELAY_MS);
 
         let firstSentence = true;
         // A tool call gets spoken about once per turn, not once per call —
@@ -241,6 +266,9 @@ export function useVoiceChat(profileId: ProfileId = null) {
           useChatStore.getState().applyEvent(profileId, event);
 
           if (event.type === 'assistant.delta') {
+            // First content means the wait is over — an armed filler that
+            // hasn't fired yet is no longer wanted.
+            cancelThinkingFiller();
             // Feed agent text through the sentence buffer → TTS
             sentenceBufRef.current.push(event.text, (sentence) => {
               void tts.speak(sentence).catch((err) => {
@@ -258,6 +286,9 @@ export function useVoiceChat(profileId: ProfileId = null) {
           }
 
           if (event.type === 'tool.started') {
+            // The tool speaks its own line — cancel any armed thinking
+            // filler so the two never stack.
+            cancelThinkingFiller();
             // The status text is a description, not the raw tool name — a
             // user hears/reads "web_search" as jargon, not information.
             // Updated on every call (it's just text, not speech, so
@@ -339,6 +370,8 @@ export function useVoiceChat(profileId: ProfileId = null) {
       } finally {
         inFlight.current = false;
         useChatStore.getState().setActiveRun(profileId, null);
+        // The turn is over — nothing left to wait for.
+        cancelThinkingFiller();
       }
     },
     [connection, profileId, voiceProfile.tts, transition, enterIdle, setStatus],

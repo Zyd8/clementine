@@ -9,7 +9,7 @@ import type { TtsCallbacks, TtsProvider } from '@/voice/tts';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
 import { VOICE_PROFILE_DEFAULTS } from '@/types/voice';
 
-import { useVoiceChat } from './useVoiceChat';
+import { THINKING_FILLER_DELAY_MS, useVoiceChat } from './useVoiceChat';
 
 // Mock the runs API (mirrors useChat.test.ts pattern)
 // A recorder that actually yields a clip, so `asr.stop()` reaches the
@@ -951,8 +951,19 @@ describe('useVoiceChat', () => {
       expect(searching.length + lookingUp.length).toBeLessThanOrEqual(1);
     });
 
-    /** Fills the wait for the model's first token instead of dead air. */
-    it('speaks a filler as soon as the run starts, before anything else arrives', async () => {
+    /**
+     * The regression this guards: a fast reply ("hi", no tools) used to get
+     * "Alright, thinking." spoken right before the answer — jarring. The
+     * filler must only fire when the wait for the first token is real.
+     */
+    it('stays silent when the reply arrives quickly — no thinking filler', async () => {
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'assistant.delta', text: 'Hi.' } as StreamEvent,
+          { type: 'run.completed', output: 'Hi.' } as StreamEvent,
+        ]),
+      );
+
       const { result } = await renderHook(() => useVoiceChat());
       await act(async () => {
         await result.current.tapMic();
@@ -964,9 +975,61 @@ describe('useVoiceChat', () => {
         await result.current.simulateEndOfSpeech();
       });
 
+      // Let the whole armed-filler window pass — a timer that was meant to
+      // be cancelled must stay silent, not speak late.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, THINKING_FILLER_DELAY_MS + 400));
+      });
+
+      const speak = ttsProvider.current?.speak as jest.Mock;
+      expect(speak.mock.calls.map(([text]) => String(text))).toEqual(['Hi.']);
+    });
+
+    /** Fills the wait for the model's first token instead of dead air. */
+    it('speaks the thinking filler only when the first token is slow to arrive', async () => {
+      // The run is held open with no content yet — the exact wait the
+      // filler exists for.
+      let releaseGate: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        releaseGate = resolve;
+      });
+      mockedStream.mockReturnValue(
+        (async function* () {
+          await gate;
+          yield { type: 'assistant.delta', text: 'Hi.' } as StreamEvent;
+        })(),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      // Deliberately not awaited to completion — sendRun is stuck on the
+      // gate, standing in for a model that is still thinking.
+      await act(async () => {
+        void result.current.simulateEndOfSpeech();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      // Past the filler delay with still nothing from the model: the
+      // filler should have been spoken by now.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, THINKING_FILLER_DELAY_MS + 400));
+      });
       const speak = ttsProvider.current?.speak as jest.Mock;
       expect(speak).toHaveBeenCalled();
-      expect(String(speak.mock.calls[0]![0]).length).toBeGreaterThan(0);
+
+      // Release the reply — the real sentence follows the filler.
+      await act(async () => {
+        releaseGate();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await waitFor(() => {
+        expect(speak.mock.calls.some(([text]) => String(text) === 'Hi.')).toBe(true);
+      });
     });
 
     /**
