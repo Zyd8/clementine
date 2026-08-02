@@ -12,7 +12,9 @@ import {
 
 import { ToolCallCard } from '@/components/features/ToolCallCard';
 import { Bubble } from '@/components/ui/Bubble';
+import { MicButton } from '@/components/ui/MicButton';
 import { useChat } from '@/hooks/useChat';
+import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useTheme } from '@/hooks/useTheme';
 import { useChatStore, type FeedItem } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
@@ -36,6 +38,7 @@ export default function ChatScreen() {
   const feed = useChatStore((s) => s.feed(null));
   const usage = useUsageStore((s) => s.total(null));
   const { send, stop, isStreaming } = useChat();
+  const { voiceState, tapMic } = useVoiceChat();
   const [draft, setDraft] = useState('');
 
   const themeMode = useSettingsStore((s) => s.theme);
@@ -72,85 +75,105 @@ export default function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ backgroundColor: theme.colors.canvas, flex: 1 }}
     >
+      {/* Two rows: identity on top, navigation below. One row could not hold
+          both — the endpoint name lost the width fight with four nav labels
+          and rendered clipped. */}
       <View
         style={{
-          alignItems: 'center',
           borderBottomColor: theme.colors.steel,
           borderBottomWidth: 1,
-          flexDirection: 'row',
           gap: theme.spacing.sm,
           padding: theme.spacing.md,
         }}
       >
-        {/* Gold while the agent is working, steel when idle — the whole
-            design language in one 8px dot. */}
         <View
-          accessibilityLabel={isStreaming ? 'Agent is working' : 'Idle'}
-          style={{
-            backgroundColor: isStreaming ? theme.colors.gold : theme.colors.steel,
-            borderRadius: theme.radius.full,
-            height: 8,
-            width: 8,
-          }}
-        />
-        <Text
-          numberOfLines={1}
-          style={{
-            color: theme.colors.ink,
-            flex: 1,
-            fontFamily: theme.typography.mono.fontFamily,
-            fontSize: theme.typography.mono.fontSize,
-          }}
+          style={{ alignItems: 'center', flexDirection: 'row', gap: theme.spacing.sm }}
         >
-          {connection?.name ?? connection?.baseUrl ?? 'NOT CONNECTED'}
-        </Text>
-        <Pressable onPress={() => router.push('/sessions')}>
-          <Text
+          {/* Gold while the agent is working, steel when idle — the whole
+              design language in one 8px dot. */}
+          <View
+            accessibilityLabel={isStreaming ? 'Agent is working' : 'Idle'}
             style={{
-              color: theme.colors.inkMuted,
+              backgroundColor: isStreaming ? theme.colors.gold : theme.colors.steel,
+              borderRadius: theme.radius.full,
+              height: 8,
+              width: 8,
+            }}
+          />
+          <Text
+            numberOfLines={1}
+            style={{
+              color: theme.colors.ink,
+              flex: 1,
               fontFamily: theme.typography.mono.fontFamily,
               fontSize: theme.typography.mono.fontSize,
             }}
           >
-            SESSIONS
+            {connection?.name ?? connection?.baseUrl ?? 'NOT CONNECTED'}
           </Text>
-        </Pressable>
-        <Pressable onPress={() => router.push('/voice-profile')}>
-          <Text
-            style={{
-              color: theme.colors.gold,
-              fontFamily: theme.typography.mono.fontFamily,
-              fontSize: theme.typography.mono.fontSize,
-            }}
+          {/* A readout, not a control — the audit's "looks like one thing,
+              navigates somewhere else" finding. SETUP is its own link below. */}
+          {usage.totalTokens > 0 ? (
+            <View
+              testID="usage-badge"
+              style={{
+                backgroundColor: theme.colors.canvasRaised,
+                borderColor: theme.colors.steel,
+                borderRadius: theme.radius.full,
+                borderWidth: 1,
+                paddingHorizontal: theme.spacing.sm,
+                paddingVertical: 2,
+              }}
+            >
+              <Text
+                style={{
+                  color: theme.colors.inkMuted,
+                  fontFamily: theme.typography.mono.fontFamily,
+                  fontSize: 11,
+                }}
+              >
+                {`${usage.totalTokens} tok`}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: theme.spacing.md }}>
+          {(
+            [
+              ['SESSIONS', '/sessions'],
+              ['VOICE', '/voice-profile'],
+              ['SETUP', '/setup'],
+            ] as const
+          ).map(([label, href]) => (
+            <Pressable key={label} onPress={() => router.push(href)}>
+              <Text
+                style={{
+                  color: theme.colors.inkMuted,
+                  fontFamily: theme.typography.mono.fontFamily,
+                  fontSize: theme.typography.mono.fontSize,
+                }}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          ))}
+          <View style={{ flex: 1 }} />
+          <Pressable
+            accessibilityLabel="Toggle theme"
+            onPress={() => void setTheme(nextTheme(themeMode))}
           >
-            VOICE
-          </Text>
-        </Pressable>
-        <Pressable onPress={() => router.push('/setup')}>
-          <Text
-            style={{
-              color: theme.colors.inkMuted,
-              fontFamily: theme.typography.mono.fontFamily,
-              fontSize: theme.typography.mono.fontSize,
-            }}
-          >
-            {usage.totalTokens > 0 ? `${usage.totalTokens} tok` : 'SETUP'}
-          </Text>
-        </Pressable>
-        <Pressable
-          accessibilityLabel="Toggle theme"
-          onPress={() => void setTheme(nextTheme(themeMode))}
-        >
-          <Text
-            style={{
-              color: theme.colors.inkMuted,
-              fontFamily: theme.typography.mono.fontFamily,
-              fontSize: theme.typography.mono.fontSize,
-            }}
-          >
-            {themeMode.toUpperCase()}
-          </Text>
-        </Pressable>
+            <Text
+              style={{
+                color: theme.colors.inkMuted,
+                fontFamily: theme.typography.mono.fontFamily,
+                fontSize: theme.typography.mono.fontSize,
+              }}
+            >
+              {themeMode.toUpperCase()}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       <FlatList
@@ -162,6 +185,7 @@ export default function ChatScreen() {
 
       <View
         style={{
+          alignItems: 'center',
           borderTopColor: theme.colors.steel,
           borderTopWidth: 1,
           flexDirection: 'row',
@@ -209,6 +233,10 @@ export default function ChatScreen() {
             {isStreaming ? '■' : '↑'}
           </Text>
         </Pressable>
+        {/* Tap-to-talk. The hook owns the ASR/TTS lifecycle; this is the only
+            place it is reachable from. 46px per the handoff composer spec —
+            the 64px circle belongs to the full-screen voice overlay. */}
+        <MicButton voiceState={voiceState} onPress={tapMic} size={46} />
       </View>
     </KeyboardAvoidingView>
   );

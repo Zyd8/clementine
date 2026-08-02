@@ -22,6 +22,25 @@ describe('Bubble', () => {
     expect(screen.getByText('hi there')).toBeTruthy();
   });
 
+  /**
+   * Hermes commonly opens a reply with blank lines after a tool call. The
+   * store keeps the wire text verbatim; the bubble must not render those as
+   * a tall empty block hanging off the gold border.
+   */
+  // `raw` defeats the default normalizer, which trims whitespace before
+  // matching and would hide exactly the bug these two cover.
+  const raw = { normalizer: (s: string) => s };
+
+  it('does not render leading or trailing blank lines as empty space', async () => {
+    await render(<Bubble role="assistant" text={'\n\n\nDone!\n\n'} />);
+    expect(screen.getByText('Done!', raw)).toBeTruthy();
+  });
+
+  it('keeps blank lines inside the message — they are the agent’s formatting', async () => {
+    await render(<Bubble role="assistant" text={'first\n\nsecond'} />);
+    expect(screen.getByText('first\n\nsecond', raw)).toBeTruthy();
+  });
+
   it('gives the user bubble a raised surface', async () => {
     await render(<Bubble role="user" text="hello" testID="b" />);
     expect(flatten(screen.getByTestId('b').props.style).backgroundColor).toBe(

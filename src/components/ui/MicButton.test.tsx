@@ -14,6 +14,26 @@ beforeEach(() => {
 });
 
 describe('MicButton', () => {
+  /**
+   * DESIGN.md's Assets note: iconography is typographic, never an image.
+   * An emoji renders as a color bitmap glyph and breaks the terminal look.
+   */
+  it('draws the mic with a typographic glyph, not an emoji', async () => {
+    await render(<MicButton voiceState="IDLE" onPress={jest.fn()} />);
+    expect(screen.queryByText('🎤')).toBeNull();
+  });
+
+  /** 64px in the voice overlay, 46px in the chat composer (handoff spec). */
+  it('accepts a size so the composer can mount a smaller circle', async () => {
+    await render(<MicButton voiceState="IDLE" onPress={jest.fn()} size={46} testID="mic" />);
+    const style = Object.assign(
+      {},
+      ...[screen.getByTestId('mic').props.style].flat(Infinity).filter(Boolean),
+    );
+    expect(style.width).toBe(46);
+    expect(style.height).toBe(46);
+  });
+
   it('renders in IDLE state with gold fill', async () => {
     await render(<MicButton voiceState="IDLE" onPress={jest.fn()} />);
     // The gold signal color is the same in both themes, but we pin dark anyway.

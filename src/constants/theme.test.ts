@@ -59,4 +59,33 @@ describe('theme tokens', () => {
       expect(typeof darkTheme.typography[role].fontSize).toBe('number');
     }
   });
+
+  /**
+   * React Native resolves `fontFamily` to a single loaded family — it does not
+   * parse CSS-style fallback lists. A value like "JetBrainsMono, monospace"
+   * silently resolves to nothing and the platform's proportional default is
+   * used instead, which is exactly what DESIGN.md forbids.
+   */
+  it('names one loaded font family per role, not a CSS fallback list', () => {
+    const roles = ['display', 'heading', 'body', 'mono'] as const;
+    for (const role of roles) {
+      const family = darkTheme.typography[role].fontFamily;
+      expect(family).not.toContain(',');
+      expect(family).toMatch(/^JetBrainsMono-/);
+    }
+  });
+
+  it('exposes each weight as its own family — Android does not synthesize bold', () => {
+    for (const family of Object.values(darkTheme.fonts)) {
+      expect(family).not.toContain(',');
+      expect(family).toMatch(/^JetBrainsMono-/);
+    }
+  });
+
+  it('picks the family matching each role’s weight', () => {
+    expect(darkTheme.typography.display.fontFamily).toBe(darkTheme.fonts.bold);
+    expect(darkTheme.typography.heading.fontFamily).toBe(darkTheme.fonts.semibold);
+    expect(darkTheme.typography.body.fontFamily).toBe(darkTheme.fonts.regular);
+    expect(darkTheme.typography.mono.fontFamily).toBe(darkTheme.fonts.regular);
+  });
 });

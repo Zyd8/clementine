@@ -1,3 +1,4 @@
+import { useFonts } from 'expo-font';
 import { Stack, router } from 'expo-router';
 import { useEffect } from 'react';
 import { View } from 'react-native';
@@ -11,6 +12,15 @@ initTelemetry({ dsn: process.env.EXPO_PUBLIC_SENTRY_DSN });
 
 export default function RootLayout() {
   const theme = useTheme();
+
+  // Loaded at runtime so Expo Go and dev clients get the real face without a
+  // native rebuild. The keys are the family names the theme tokens reference.
+  const [fontsLoaded] = useFonts({
+    'JetBrainsMono-Regular': require('../assets/fonts/JetBrainsMono-Regular.ttf'),
+    'JetBrainsMono-SemiBold': require('../assets/fonts/JetBrainsMono-SemiBold.ttf'),
+    'JetBrainsMono-Bold': require('../assets/fonts/JetBrainsMono-Bold.ttf'),
+  });
+
   const hydrateSettings = useSettingsStore((s) => s.hydrate);
   const hydrateConnection = useConnectionStore((s) => s.hydrate);
   const hydrated = useConnectionStore((s) => s.hydrated);
@@ -27,9 +37,10 @@ export default function RootLayout() {
     router.replace(connection ? '/' : '/setup');
   }, [hydrated, connection]);
 
-  // Hold a blank canvas until hydration settles, rather than flashing the
-  // wrong screen or the wrong theme.
-  if (!hydrated) {
+  // Hold a blank canvas until hydration settles and the font is in memory,
+  // rather than flashing the wrong screen, the wrong theme, or a frame of
+  // proportional fallback text.
+  if (!hydrated || !fontsLoaded) {
     return <View style={{ flex: 1, backgroundColor: theme.colors.canvas }} />;
   }
 
@@ -38,6 +49,7 @@ export default function RootLayout() {
       screenOptions={{
         headerStyle: { backgroundColor: theme.colors.canvas },
         headerTintColor: theme.colors.ink,
+        headerTitleStyle: { fontFamily: theme.fonts.bold, fontSize: 20 },
         contentStyle: { backgroundColor: theme.colors.canvas },
       }}
     >

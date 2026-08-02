@@ -9,6 +9,9 @@ type MicButtonProps = {
   voiceState: VoiceChatState;
   /** Tap to start/cancel/interrupt. Not hold — tap semantics. */
   onPress: () => void;
+  /** 64 in the voice overlay, 46 in the chat composer. */
+  size?: number;
+  testID?: string;
 };
 
 /**
@@ -23,7 +26,7 @@ type MicButtonProps = {
  * TAP semantics (not hold) — matches the interaction contract:
  * tap once to start, tap again to cancel, tap during playback to interrupt.
  */
-export function MicButton({ voiceState, onPress }: MicButtonProps) {
+export function MicButton({ voiceState, onPress, size = 64, testID }: MicButtonProps) {
   const theme = useTheme();
 
   const isActive = voiceState === 'LISTENING';
@@ -59,6 +62,7 @@ export function MicButton({ voiceState, onPress }: MicButtonProps) {
 
   return (
     <Pressable
+      testID={testID}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -74,22 +78,25 @@ export function MicButton({ voiceState, onPress }: MicButtonProps) {
           borderColor,
           opacity: pressed ? 0.8 : 1,
           borderRadius: theme.radius.full,
-          width: 64,
-          height: 64,
+          width: size,
+          height: size,
         },
       ]}
     >
-      {/* Mic icon (simple Unicode glyph) */}
+      {/* Typographic, not an emoji: DESIGN.md keeps iconography to glyphs so
+          the surface reads as a terminal. A filled dot is the record mark —
+          it says "capturing" without pulling in an icon font. */}
       <Text
         style={[
           styles.icon,
           {
             color: isActive ? theme.colors.gold : theme.colors.canvas,
-            fontSize: 28,
+            fontFamily: theme.fonts.bold,
+            fontSize: size * 0.42,
           },
         ]}
       >
-        🎤
+        ●
       </Text>
     </Pressable>
   );

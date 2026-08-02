@@ -51,7 +51,12 @@ export function Bubble({ role, text, streaming, testID }: BubbleProps) {
           lineHeight: theme.typography.body.lineHeight,
         }}
       >
-        {text}
+        {/* The store keeps the wire text verbatim, and Hermes often opens a
+            reply with blank lines after a tool call. Trimming the ends is a
+            render concern: interior blank lines are the agent's formatting
+            and stay. While streaming only the head is trimmed, so the cursor
+            still sits against the last character. */}
+        {streaming ? text.trimStart() : text.trim()}
         {streaming ? (
           <Text accessibilityLabel="Agent is replying" style={{ color: accent }}>
             {' █'}

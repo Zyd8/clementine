@@ -24,6 +24,8 @@ export type TypeToken = {
 
 export type Theme = {
   scheme: ThemeScheme;
+  /** Font families by weight — use these instead of `fontWeight`. */
+  fonts: { regular: string; semibold: string; bold: string };
   colors: {
     canvas: string;
     canvasRaised: string;
@@ -45,8 +47,20 @@ export type Theme = {
   };
 };
 
-/** JetBrains Mono is the intended face; the fallback keeps it monospace. */
-const MONO = 'JetBrainsMono-Regular, monospace';
+/**
+ * The three JetBrains Mono faces bundled in `assets/fonts`, loaded by
+ * `app/_layout.tsx` before the first screen paints.
+ *
+ * One family name per weight, because React Native takes a single loaded
+ * family here — not a CSS fallback list — and Android will not synthesize a
+ * bold face from a regular one. Setting `fontWeight` alongside a custom
+ * family is unreliable across platforms; pick the family instead.
+ */
+const fonts = {
+  regular: 'JetBrainsMono-Regular',
+  semibold: 'JetBrainsMono-SemiBold',
+  bold: 'JetBrainsMono-Bold',
+} as const;
 
 const spacing = { xs: 4, sm: 8, md: 16, lg: 24 } as const;
 
@@ -55,10 +69,10 @@ const radius = { sm: 4, md: 8, full: 9999 } as const;
 
 /** rem values from DESIGN.md converted at a 16px base. */
 const typography = {
-  display: { fontFamily: MONO, fontSize: 32, fontWeight: '700', lineHeight: 38 },
-  heading: { fontFamily: MONO, fontSize: 20, fontWeight: '600', lineHeight: 26 },
-  body: { fontFamily: MONO, fontSize: 15, fontWeight: '400', lineHeight: 23 },
-  mono: { fontFamily: MONO, fontSize: 14, fontWeight: '400', lineHeight: 20 },
+  display: { fontFamily: fonts.bold, fontSize: 32, fontWeight: '700', lineHeight: 38 },
+  heading: { fontFamily: fonts.semibold, fontSize: 20, fontWeight: '600', lineHeight: 26 },
+  body: { fontFamily: fonts.regular, fontSize: 15, fontWeight: '400', lineHeight: 23 },
+  mono: { fontFamily: fonts.regular, fontSize: 14, fontWeight: '400', lineHeight: 20 },
 } as const satisfies Theme['typography'];
 
 /** Semantic colors that must not drift between schemes. */
@@ -71,6 +85,7 @@ const signal = {
 
 export const darkTheme: Theme = {
   scheme: 'dark',
+  fonts,
   colors: {
     canvas: '#1a1d23',
     canvasRaised: '#23272f',
@@ -86,6 +101,7 @@ export const darkTheme: Theme = {
 
 export const lightTheme: Theme = {
   scheme: 'light',
+  fonts,
   colors: {
     // Warm off-white rather than pure white, mirroring "never pure black".
     canvas: '#f5f3f0',
