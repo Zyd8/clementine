@@ -1,10 +1,11 @@
 import React from 'react';
 import { act, render, screen, fireEvent } from '@testing-library/react-native';
-import { FlatList } from 'react-native';
+import { Alert, FlatList } from 'react-native';
 
 import { darkTheme } from '@/constants/theme';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
+import type { Attachment } from '@/types/attachments';
 
 import ChatScreen from '../../app/(tabs)/index';
 
@@ -27,6 +28,20 @@ jest.mock('@/hooks/useChat', () => ({
     send: jest.fn(),
     stop: jest.fn(),
     isStreaming: false,
+  }),
+}));
+
+const mockPickImage = jest.fn();
+const mockPickFile = jest.fn();
+const mockRemoveAttachment = jest.fn();
+let mockAttachments: Attachment[] = [];
+jest.mock('@/hooks/useAttachments', () => ({
+  useAttachments: () => ({
+    attachments: mockAttachments,
+    pickImage: mockPickImage,
+    pickFile: mockPickFile,
+    remove: mockRemoveAttachment,
+    clear: jest.fn(),
   }),
 }));
 
@@ -127,6 +142,10 @@ describe('ChatScreen — header', () => {
 
 describe('ChatScreen — composer', () => {
   beforeEach(() => {
+    mockAttachments = [];
+    mockPickImage.mockClear();
+    mockPickFile.mockClear();
+    mockRemoveAttachment.mockClear();
     useSettingsStore.setState({ theme: 'dark', hydrated: true });
     useConnectionStore.setState({
       connection: {
@@ -231,5 +250,96 @@ describe('ChatScreen — composer', () => {
     }
 
     scrollSpy.mockRestore();
+  });
+
+  describe('attachments', () => {
+    it('offers a photo or a file when tapped', async () => {
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+
+      await render(<ChatScreen />);
+      fireEvent.press(screen.getByLabelText('Attach a file or photo'));
+
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Attach',
+        undefined,
+        expect.arrayContaining([
+          expect.objectContaining({ text: 'Photo' }),
+          expect.objectContaining({ text: 'File' }),
+        ]),
+      );
+
+      alertSpy.mockRestore();
+    });
+
+    it('picking Photo calls the image picker', async () => {
+      jest.spyOn(Alert, 'alert').mockImplementation((_title, _msg, buttons) => {
+        buttons?.find((b) => b.text === 'Photo')?.onPress?.();
+      });
+
+      await render(<ChatScreen />);
+      fireEvent.press(screen.getByLabelText('Attach a file or photo'));
+
+      expect(mockPickImage).toHaveBeenCalled();
+      jest.restoreAllMocks();
+    });
+
+    it('picking File calls the document picker', async () => {
+      jest.spyOn(Alert, 'alert').mockImplementation((_title, _msg, buttons) => {
+        buttons?.find((b) => b.text === 'File')?.onPress?.();
+      });
+
+      await render(<ChatScreen />);
+      fireEvent.press(screen.getByLabelText('Attach a file or photo'));
+
+      expect(mockPickFile).toHaveBeenCalled();
+      jest.restoreAllMocks();
+    });
+
+    it('shows nothing extra when there is nothing attached', async () => {
+      await render(<ChatScreen />);
+      expect(
+        screen.queryByText('Attached here, not sent to the agent yet.'),
+      ).toBeNull();
+    });
+
+    it('previews a staged attachment by name', async () => {
+      mockAttachments = [
+        { id: 'a1', uri: 'file:///photo.jpg', name: 'photo.jpg', kind: 'image' },
+      ];
+
+      await render(<ChatScreen />);
+
+      expect(screen.getByTestId('attachment-a1')).toBeTruthy();
+      expect(screen.getByText(/photo\.jpg/)).toBeTruthy();
+    });
+
+    /**
+     * Honest, not hidden: there is no confirmed way for this to actually
+     * reach the agent yet (see useAttachments.ts), so the row stays visible
+     * and says so rather than disappearing into a message that doesn't
+     * carry it.
+     */
+    it('is explicit that a staged attachment is not sent yet', async () => {
+      mockAttachments = [
+        { id: 'a1', uri: 'file:///photo.jpg', name: 'photo.jpg', kind: 'image' },
+      ];
+
+      await render(<ChatScreen />);
+
+      expect(
+        screen.getByText('Attached here, not sent to the agent yet.'),
+      ).toBeTruthy();
+    });
+
+    it('removes an attachment on tap', async () => {
+      mockAttachments = [
+        { id: 'a1', uri: 'file:///photo.jpg', name: 'photo.jpg', kind: 'image' },
+      ];
+
+      await render(<ChatScreen />);
+      fireEvent.press(screen.getByLabelText('Remove photo.jpg'));
+
+      expect(mockRemoveAttachment).toHaveBeenCalledWith('a1');
+    });
   });
 });

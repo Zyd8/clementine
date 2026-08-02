@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
-import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { ProfilePicker } from '@/components/features/ProfilePicker';
 import { ThinkingDots } from '@/components/features/ThinkingDots';
@@ -8,6 +8,7 @@ import { ToolCallCard } from '@/components/features/ToolCallCard';
 import { Avatar } from '@/components/ui/Avatar';
 import { Bubble } from '@/components/ui/Bubble';
 import { MicButton } from '@/components/ui/MicButton';
+import { useAttachments } from '@/hooks/useAttachments';
 import { useChat } from '@/hooks/useChat';
 import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
@@ -39,6 +40,15 @@ export default function ChatScreen() {
   const { send, stop, isStreaming } = useChat(profileId);
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const { attachments, pickImage, pickFile, remove: removeAttachment } = useAttachments();
+
+  const onAttach = () => {
+    Alert.alert('Attach', undefined, [
+      { text: 'Photo', onPress: () => void pickImage() },
+      { text: 'File', onPress: () => void pickFile() },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
 
   // KeyboardAvoidingView did nothing on Android — see useKeyboardOverlap.
   const composerRef = useRef<View>(null);
@@ -289,12 +299,78 @@ export default function ChatScreen() {
         }
       />
 
+      {/* Picked, not sent: there is no confirmed way for an attachment to
+          reach the agent yet (`POST /v1/runs` only documents a plain-text
+          `input`), so this stays visible and removable rather than
+          disappearing into a message that doesn't actually carry it. */}
+      {attachments.length > 0 ? (
+        <View style={{ borderTopColor: theme.colors.steel, borderTopWidth: 1 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8, padding: 10 }}
+          >
+            {attachments.map((attachment) => (
+              <View
+                key={attachment.id}
+                testID={`attachment-${attachment.id}`}
+                style={{
+                  alignItems: 'center',
+                  backgroundColor: theme.colors.canvasRaised,
+                  borderColor: theme.colors.steel,
+                  borderRadius: theme.radius.sm,
+                  borderWidth: 1,
+                  flexDirection: 'row',
+                  gap: 6,
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                }}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: theme.colors.ink,
+                    fontFamily: theme.fonts.regular,
+                    fontSize: theme.type(11.5),
+                    maxWidth: 140,
+                  }}
+                >
+                  {attachment.kind === 'image' ? '🖼 ' : '📄 '}
+                  {attachment.name}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${attachment.name}`}
+                  onPress={() => removeAttachment(attachment.id)}
+                  hitSlop={8}
+                >
+                  <Text style={{ color: theme.colors.inkMuted, fontSize: theme.type(13) }}>
+                    ×
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+          <Text
+            style={{
+              color: theme.colors.inkMuted,
+              fontFamily: theme.fonts.regular,
+              fontSize: theme.type(9.5),
+              paddingBottom: 6,
+              paddingHorizontal: 10,
+            }}
+          >
+            Attached here, not sent to the agent yet.
+          </Text>
+        </View>
+      ) : null}
+
       <View
         ref={composerRef}
         style={{
           alignItems: 'center',
           borderTopColor: theme.colors.steel,
-          borderTopWidth: 1,
+          borderTopWidth: attachments.length > 0 ? 0 : 1,
           flexDirection: 'row',
           gap: 10,
           marginBottom: keyboardOverlap,
@@ -302,6 +378,17 @@ export default function ChatScreen() {
           paddingVertical: 12,
         }}
       >
+        {/* Opens voice mode rather than recording here: `useVoiceChat` keeps
+            its machine in component state, so two mounted callers would run
+            two competing sessions. 46px per the design's composer row — the
+            64px circle belongs to the voice overlay. Leftmost, ahead of the
+            text field, so it reads as an alternative way to start a turn
+            rather than a trailing extra. */}
+        <MicButton
+          voiceState="IDLE"
+          onPress={() => router.push('/voice')}
+          size={46}
+        />
         <TextInput
           aria-label="Message"
           value={draft}
@@ -322,6 +409,31 @@ export default function ChatScreen() {
             paddingVertical: 11,
           }}
         />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Attach a file or photo"
+          onPress={onAttach}
+          style={{
+            alignItems: 'center',
+            backgroundColor: theme.colors.canvasRaised,
+            borderColor: theme.colors.steel,
+            borderRadius: theme.radius.sm,
+            borderWidth: 1,
+            height: 38,
+            justifyContent: 'center',
+            width: 38,
+          }}
+        >
+          <Text
+            style={{
+              color: theme.colors.inkMuted,
+              fontFamily: theme.fonts.bold,
+              fontSize: theme.type(16),
+            }}
+          >
+            +
+          </Text>
+        </Pressable>
         <Pressable
           accessibilityLabel={isStreaming ? 'Stop the run' : 'Send message'}
           onPress={isStreaming ? () => void stop() : onSend}
@@ -344,15 +456,6 @@ export default function ChatScreen() {
             {isStreaming ? '■' : '➜'}
           </Text>
         </Pressable>
-        {/* Opens voice mode rather than recording here: `useVoiceChat` keeps
-            its machine in component state, so two mounted callers would run
-            two competing sessions. 46px per the design's composer row — the
-            64px circle belongs to the voice overlay. */}
-        <MicButton
-          voiceState="IDLE"
-          onPress={() => router.push('/voice')}
-          size={46}
-        />
       </View>
 
       <ProfilePicker
