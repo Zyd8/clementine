@@ -198,17 +198,15 @@ Enable once on the host running Hermes (`~/.hermes/.env`):
 CLEMENTINE_API_ENABLED=true
 CLEMENTINE_API_KEY=<long-random-secret>
 # CLEMENTINE_API_CORS_ORIGINS=...   # only for browser clients; native app ignores CORS
-
-# Mirror: the names the Hermes gateway actually reads today.
-API_SERVER_ENABLED=true
-API_SERVER_KEY=<same value as CLEMENTINE_API_KEY>
 ```
 
-**Naming note.** `CLEMENTINE_API_KEY` is this project's canonical name and the
-one every doc, runbook, and onboarding string uses. Upstream Hermes hardcodes
-`API_SERVER_KEY` / `API_SERVER_ENABLED` in its gateway, so a host must set both
-with identical values or the API server never starts. The mirror lines go away
-once upstream reads the `CLEMENTINE_*` names.
+**Naming note.** `CLEMENTINE_API_KEY` is the canonical name — the only one
+docs, runbooks, and onboarding strings use. This repo's laptop Hermes runs a
+patched gateway that reads `CLEMENTINE_*` directly (alias helper, `API_SERVER_*`
+fallback); the VPS instance is not exposed to the app. If the laptop gateway is
+ever re-installed from stock upstream, re-apply the patch or the `API_SERVER_*`
+mirror lines — keep a mirror ready in the laptop `~/.hermes/.env` (both sets
+with matching values) until the rename lands upstream.
 
 Server listens on `http://127.0.0.1:8642` by default. The mobile app reaches it
 over HTTPS via a reverse proxy (Caddy on the VPS) or Tailscale for dev.

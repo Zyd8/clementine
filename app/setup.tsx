@@ -52,7 +52,7 @@ export default function SetupScreen() {
           On your Hermes machine, run:
         </Text>
         <Text style={{ color: theme.colors.gold, ...theme.typography.mono }}>
-          grep API_SERVER_KEY ~/.hermes/.env
+          grep CLEMENTINE_API_KEY ~/.hermes/.env
         </Text>
         <Text style={{ color: theme.colors.inkMuted, ...theme.typography.mono }}>
           Then paste the URL and key here.
