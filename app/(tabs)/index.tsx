@@ -40,7 +40,8 @@ export default function ChatScreen() {
   const { send, stop, isStreaming } = useChat(profileId);
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
-  const { attachments, pickImage, pickFile, remove: removeAttachment } = useAttachments();
+  const { attachments, pickImage, pickFile, remove: removeAttachment, clear: clearAttachments } =
+    useAttachments();
 
   const onAttach = () => {
     Alert.alert('Attach', undefined, [
@@ -79,8 +80,13 @@ export default function ChatScreen() {
 
   const onSend = () => {
     const text = draft;
+    const staged = attachments;
     setDraft('');
-    void send(text);
+    // Cleared on tap, not after send resolves: `send` reports failure through
+    // the feed (a run.failed item), same as a plain message does — there is
+    // no separate "attachment didn't go through" state to hold these for.
+    clearAttachments();
+    void send(text, staged);
   };
 
   // A run is live but nothing has streamed yet — on a tool-heavy turn that
@@ -299,10 +305,11 @@ export default function ChatScreen() {
         }
       />
 
-      {/* Picked, not sent: there is no confirmed way for an attachment to
-          reach the agent yet (`POST /v1/runs` only documents a plain-text
-          `input`), so this stays visible and removable rather than
-          disappearing into a message that doesn't actually carry it. */}
+      {/* Sent as base64 embedded in the message text — there is no confirmed
+          upload path (`POST /v1/runs` only documents a plain-text `input`),
+          so this is an experimental fallback, not a real upload. Whether the
+          connected agent's model actually reads it as an image/file rather
+          than a wall of text isn't guaranteed. See attachmentEncoding.ts. */}
       {attachments.length > 0 ? (
         <View style={{ borderTopColor: theme.colors.steel, borderTopWidth: 1 }}>
           <ScrollView
@@ -360,7 +367,7 @@ export default function ChatScreen() {
               paddingHorizontal: 10,
             }}
           >
-            Attached here, not sent to the agent yet.
+            Experimental — not a confirmed upload; the agent may not read it.
           </Text>
         </View>
       ) : null}

@@ -127,6 +127,12 @@ jest.mock('expo-file-system', () => {
     async bytes() {
       return new Uint8Array([0, 1, 2, 3]);
     }
+    get size() {
+      return 4;
+    }
+    async base64() {
+      return 'AAECAw==';
+    }
     create() {
       createdFiles.add(this.uri);
     }

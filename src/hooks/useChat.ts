@@ -2,11 +2,20 @@ import * as Sentry from '@sentry/react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '@/api/client';
-import { createRun, getRun, stopRun, streamRunEvents } from '@/api/runs';
+import {
+  ATTACHMENT_INSTRUCTIONS,
+  createRun,
+  getRun,
+  PHONE_INSTRUCTIONS,
+  stopRun,
+  streamRunEvents,
+} from '@/api/runs';
 import { getSessionMessages, listSessions } from '@/api/sessions';
 import { useChatStore, type ProfileId } from '@/stores/chat';
 import { useUsageStore } from '@/stores/usage';
 import { useConnectionStore } from '@/stores/connection';
+import type { Attachment } from '@/types/attachments';
+import { AttachmentTooLargeError, encodeAttachmentForPrompt } from '@/utils/attachmentEncoding';
 
 /**
  * The turn lifecycle: create run → subscribe to SSE → accumulate → settle.
@@ -31,6 +40,14 @@ import { useConnectionStore } from '@/stores/connection';
  * last conversation instead of starting a new one. A profile with no prior
  * session at all learns its first one the same way, right after the first
  * message completes, so every send after that also lands in the same place.
+ *
+ * **Attachments.** There is no confirmed upload path — `POST /v1/runs` only
+ * documents a plain-text `input` (see ARCHITECTURE.md) — so an attachment
+ * travels as its own base64 data URI embedded directly in that text (see
+ * `attachmentEncoding.ts`). Deliberately kept separate from what the user's
+ * own bubble shows: nobody wants to read a wall of base64 in their own sent
+ * message, so the feed shows a clean "📎 name" line while the wire payload
+ * carries the real content.
  */
 
 const GENERIC_FAILURE = 'The connection dropped mid-run.';
@@ -81,23 +98,48 @@ export function useChat(profileId: ProfileId = null) {
   }, [connection, profileId]);
 
   const send = useCallback(
-    async (input: string) => {
+    async (input: string, attachments: Attachment[] = []) => {
       const text = input.trim();
-      if (!text || inFlight.current || !connection) return;
+      if ((!text && attachments.length === 0) || inFlight.current || !connection) return;
 
       const store = useChatStore.getState();
       inFlight.current = true;
       setIsStreaming(true);
-      store.appendUserMessage(profileId, text);
+
+      // The user's own bubble stays clean — the encoded payload (below) is
+      // for the agent, not for reading back at yourself in the feed.
+      const displayText = [text, ...attachments.map((a) => `📎 ${a.name}`)]
+        .filter(Boolean)
+        .join('\n');
+      store.appendUserMessage(profileId, displayText);
 
       const { baseUrl, apiKey } = connection;
       let runId: string | undefined;
 
       try {
+        let wireInput = text;
+        if (attachments.length > 0) {
+          try {
+            const encoded = await Promise.all(attachments.map(encodeAttachmentForPrompt));
+            wireInput = [text, ...encoded].filter(Boolean).join('\n\n');
+          } catch (err) {
+            // No run started — nothing to reconcile, just say what failed.
+            const message =
+              err instanceof AttachmentTooLargeError
+                ? err.message
+                : 'Could not attach that file.';
+            store.applyEvent(profileId, { type: 'run.failed', message });
+            return;
+          }
+        }
+
         const currentSessionId = useChatStore.getState().sessionId(profileId);
         const handle = await createRun(baseUrl, apiKey, {
-          input: text,
+          input: wireInput,
           ...(currentSessionId ? { sessionId: currentSessionId } : {}),
+          ...(attachments.length > 0
+            ? { instructions: `${PHONE_INSTRUCTIONS} ${ATTACHMENT_INSTRUCTIONS}` }
+            : {}),
         });
         runId = handle.runId;
         store.setActiveRun(profileId, runId);

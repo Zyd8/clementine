@@ -48,6 +48,19 @@ export const PHONE_INSTRUCTIONS =
 export const VOICE_INSTRUCTIONS =
   'This reply will be spoken aloud by text-to-speech, not read on a screen. Keep it short and conversational — a sentence or two for anything simple. Do not use bullet points, numbered lists, headings, code blocks, or other visual formatting; say it the way a person would say it out loud. If the full answer is long, give the short version and offer to go into more detail.';
 
+/**
+ * Appended only to a run whose `input` has an attachment embedded in it (see
+ * `attachmentEncoding.ts`).
+ *
+ * There is no confirmed upload path — `input` is the only field this API
+ * documents — so an attachment travels as its own base64 data URI directly
+ * in the text, an experimental fallback, not a real upload. This tells the
+ * agent what that block actually is, since without it a wall of base64
+ * reads as noise rather than as a file.
+ */
+export const ATTACHMENT_INSTRUCTIONS =
+  'The message may include an attached image or file embedded inline as a base64 data URI — an image as a markdown image tag (![name](data:...;base64,...)), anything else inside an "[ATTACHED FILE: name — mimetype] ... [END ATTACHED FILE]" block. Decode and use its contents as if it had been provided as a real attachment.';
+
 export async function createRun(
   baseUrl: string,
   credential: string,

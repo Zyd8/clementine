@@ -12,6 +12,7 @@ import type { StreamEvent } from '@/types/events';
 import { useChat } from './useChat';
 
 jest.mock('@/api/runs', () => ({
+  ...jest.requireActual('@/api/runs'),
   createRun: jest.fn(),
   getRun: jest.fn(),
   stopRun: jest.fn(),
@@ -628,6 +629,116 @@ describe('useChat', () => {
         CONNECTION.baseUrl,
         CONNECTION.apiKey,
         expect.not.objectContaining({ sessionId: expect.anything() }),
+      );
+    });
+  });
+
+  describe('attachments', () => {
+    const IMAGE = {
+      id: 'a1',
+      uri: 'file:///photo.jpg',
+      name: 'photo.jpg',
+      mimeType: 'image/jpeg',
+      kind: 'image' as const,
+      size: 4,
+    };
+
+    /**
+     * There is no confirmed upload path — the encoded payload goes into
+     * `input` itself (see attachmentEncoding.ts) — but nobody wants to read
+     * a wall of base64 in the message they just sent.
+     */
+    it('keeps the base64 payload out of the user’s own bubble', async () => {
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('check this out', [IMAGE]);
+      });
+
+      expect(feed()).toEqual([
+        expect.objectContaining({ kind: 'user', text: 'check this out\n📎 photo.jpg' }),
+      ]);
+      const [, , options] = mockedCreateRun.mock.calls[0]!;
+      expect(options.input).not.toContain('check this out\n📎 photo.jpg');
+    });
+
+    it('sends the encoded attachment in the wire input', async () => {
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('check this out', [IMAGE]);
+      });
+
+      const [, , options] = mockedCreateRun.mock.calls[0]!;
+      expect(options.input).toContain('check this out');
+      expect(options.input).toContain('data:image/jpeg;base64,');
+    });
+
+    it('tells the agent how to read an attachment, on top of the phone instructions', async () => {
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('check this out', [IMAGE]);
+      });
+
+      const [, , options] = mockedCreateRun.mock.calls[0]!;
+      expect(options.instructions).toContain('phone app');
+      expect(options.instructions).toContain('data URI');
+    });
+
+    /** No attachments — the wire format must not change from before this existed. */
+    it('does not layer attachment instructions onto a plain message', async () => {
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('just text');
+      });
+
+      const [, , options] = mockedCreateRun.mock.calls[0]!;
+      expect(options.instructions).toBeUndefined();
+    });
+
+    it('sends with only an attachment and no typed text', async () => {
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('', [IMAGE]);
+      });
+
+      expect(mockedCreateRun).toHaveBeenCalled();
+      const [, , options] = mockedCreateRun.mock.calls[0]!;
+      expect(options.input).toContain('data:image/jpeg;base64,');
+    });
+
+    /**
+     * The regression this guards: an unbounded attachment embedded straight
+     * into a text field risks silently blowing past a request or context
+     * limit. Caught before any network call, with a message naming which
+     * attachment and why — never a run left dangling.
+     */
+    it('fails clearly, without starting a run, when an attachment is too large', async () => {
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('check this out', [{ ...IMAGE, size: 10_000_000 }]);
+      });
+
+      expect(mockedCreateRun).not.toHaveBeenCalled();
+      expect(feed()).toEqual([
+        expect.objectContaining({ kind: 'user' }),
+        expect.objectContaining({ kind: 'error', text: expect.stringContaining('photo.jpg') }),
+      ]);
+    });
+
+    it('clears the in-flight guard after an oversized attachment, so the next send works', async () => {
+      const { result } = await renderHook(() => useChat());
+      await act(async () => {
+        await result.current.send('a', [{ ...IMAGE, size: 10_000_000 }]);
+      });
+
+      await act(async () => {
+        await result.current.send('b');
+      });
+
+      expect(mockedCreateRun).toHaveBeenCalledTimes(1);
+      expect(mockedCreateRun).toHaveBeenCalledWith(
+        CONNECTION.baseUrl,
+        CONNECTION.apiKey,
+        expect.objectContaining({ input: 'b' }),
       );
     });
   });

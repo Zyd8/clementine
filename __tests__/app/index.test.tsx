@@ -23,9 +23,10 @@ jest.mock('@/hooks/useKeyboardOverlap', () => ({
   useKeyboardOverlap: () => 268,
 }));
 
+const mockSend = jest.fn();
 jest.mock('@/hooks/useChat', () => ({
   useChat: () => ({
-    send: jest.fn(),
+    send: mockSend,
     stop: jest.fn(),
     isStreaming: false,
   }),
@@ -34,6 +35,7 @@ jest.mock('@/hooks/useChat', () => ({
 const mockPickImage = jest.fn();
 const mockPickFile = jest.fn();
 const mockRemoveAttachment = jest.fn();
+const mockClearAttachments = jest.fn();
 let mockAttachments: Attachment[] = [];
 jest.mock('@/hooks/useAttachments', () => ({
   useAttachments: () => ({
@@ -41,7 +43,7 @@ jest.mock('@/hooks/useAttachments', () => ({
     pickImage: mockPickImage,
     pickFile: mockPickFile,
     remove: mockRemoveAttachment,
-    clear: jest.fn(),
+    clear: mockClearAttachments,
   }),
 }));
 
@@ -146,6 +148,8 @@ describe('ChatScreen — composer', () => {
     mockPickImage.mockClear();
     mockPickFile.mockClear();
     mockRemoveAttachment.mockClear();
+    mockClearAttachments.mockClear();
+    mockSend.mockClear();
     useSettingsStore.setState({ theme: 'dark', hydrated: true });
     useConnectionStore.setState({
       connection: {
@@ -298,7 +302,7 @@ describe('ChatScreen — composer', () => {
     it('shows nothing extra when there is nothing attached', async () => {
       await render(<ChatScreen />);
       expect(
-        screen.queryByText('Attached here, not sent to the agent yet.'),
+        screen.queryByText('Experimental — not a confirmed upload; the agent may not read it.'),
       ).toBeNull();
     });
 
@@ -327,7 +331,7 @@ describe('ChatScreen — composer', () => {
       await render(<ChatScreen />);
 
       expect(
-        screen.getByText('Attached here, not sent to the agent yet.'),
+        screen.getByText('Experimental — not a confirmed upload; the agent may not read it.'),
       ).toBeTruthy();
     });
 
@@ -340,6 +344,50 @@ describe('ChatScreen — composer', () => {
       fireEvent.press(screen.getByLabelText('Remove photo.jpg'));
 
       expect(mockRemoveAttachment).toHaveBeenCalledWith('a1');
+    });
+
+    it('sends whatever is staged along with the typed text', async () => {
+      mockAttachments = [
+        { id: 'a1', uri: 'file:///photo.jpg', name: 'photo.jpg', kind: 'image' },
+      ];
+
+      await render(<ChatScreen />);
+      await act(async () => {
+        fireEvent.changeText(screen.getByLabelText('Message'), 'check this out');
+      });
+      await act(async () => {
+        fireEvent.press(screen.getByLabelText('Send message'));
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('check this out', mockAttachments);
+    });
+
+    /**
+     * Cleared on tap, not after `send` resolves — `send` reports failure
+     * through the feed itself, the same as a plain message, so there is no
+     * separate "didn't go through" state worth holding these open for.
+     */
+    it('clears the staged attachments the moment send is pressed', async () => {
+      mockAttachments = [
+        { id: 'a1', uri: 'file:///photo.jpg', name: 'photo.jpg', kind: 'image' },
+      ];
+
+      await render(<ChatScreen />);
+      fireEvent.press(screen.getByLabelText('Send message'));
+
+      expect(mockClearAttachments).toHaveBeenCalled();
+    });
+
+    it('sends with an empty attachment list when nothing is staged', async () => {
+      await render(<ChatScreen />);
+      await act(async () => {
+        fireEvent.changeText(screen.getByLabelText('Message'), 'just text');
+      });
+      await act(async () => {
+        fireEvent.press(screen.getByLabelText('Send message'));
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('just text', []);
     });
   });
 });

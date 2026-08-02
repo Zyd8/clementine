@@ -41,6 +41,7 @@ export function useAttachments() {
           // roll items) — a blank row label reads as broken, not empty.
           name: asset.fileName || 'Photo',
           ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+          ...(asset.fileSize === undefined ? {} : { size: asset.fileSize }),
           kind: 'image',
         }),
       ),
