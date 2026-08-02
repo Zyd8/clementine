@@ -279,10 +279,13 @@ export function useVoiceChat(profileId: ProfileId = null) {
         }, THINKING_FILLER_DELAY_MS);
 
         let firstSentence = true;
-        // A tool call gets spoken about once per turn, not once per call —
-        // several tool calls in one reply must not repeat "One moment"
-        // (or anything else) three times in a row.
-        let toolNarrated = false;
+        // Narrated once per DISTINCT tool, not once per turn — a reply that
+        // moves from the terminal to the browser to a file edit must say so
+        // at each switch, or the user hears nothing while genuinely
+        // different things happen. What this guards against is the same
+        // tool firing repeatedly in a row (a terminal command retried, a
+        // multi-step search) saying its line every single time.
+        let lastNarratedTool: string | null = null;
 
         // Emits whatever text is still sitting in the sentence buffer with
         // no boundary yet (a trailing fragment like "and that's the answer"
@@ -346,13 +349,12 @@ export function useVoiceChat(profileId: ProfileId = null) {
             // it aloud would be.
             setStatus(`${event.tool}…`);
 
-            // But only SPOKEN once per turn — several tool calls in one
-            // reply must not repeat themselves. Deliberately NOT
-            // transitioning to PLAYING, so this can't be mistaken for the
-            // reply finishing if the tool is still running when it stops
-            // speaking.
-            if (!toolNarrated) {
-              toolNarrated = true;
+            // Spoken again whenever the tool actually changes — silent only
+            // for a repeat of the same one. Deliberately NOT transitioning
+            // to PLAYING, so this can't be mistaken for the reply finishing
+            // if the tool is still running when it stops speaking.
+            if (event.tool !== lastNarratedTool) {
+              lastNarratedTool = event.tool;
               void tts.speak(pickToolFiller(event.tool)).catch((err) => {
                 Sentry.captureException(
                   err instanceof Error ? err : new Error(String(err)),

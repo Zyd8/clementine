@@ -990,8 +990,13 @@ describe('useVoiceChat', () => {
       expect(spoken.some((text) => text.includes('searching for that'))).toBe(true);
     });
 
-    /** Several tool calls in one reply must not repeat the narration. */
-    it('narrates a tool call once per turn, not once per call', async () => {
+    /**
+     * A reply that moves from one tool to a genuinely different one (the
+     * terminal, then the browser, then a file edit) must say so at each
+     * switch — staying silent after the first tool reads as the app having
+     * hung through everything that follows.
+     */
+    it('narrates each distinct tool, not just the first one in the turn', async () => {
       mockedStream.mockReturnValue(
         streamOf([
           { type: 'tool.started', tool: 'web_search', args: '{}' } as StreamEvent,
@@ -1016,11 +1021,38 @@ describe('useVoiceChat', () => {
 
       const speak = ttsProvider.current?.speak as jest.Mock;
       const spoken = speak.mock.calls.map(([text]) => String(text));
-      // Both tool descriptions could plausibly appear once from narration —
-      // what must never happen is either being said more than once.
+      expect(spoken.some((t) => t.includes('searching for that'))).toBe(true);
+      expect(spoken.some((t) => t.includes('looking that up'))).toBe(true);
+    });
+
+    /** The same tool firing again right after itself must not repeat the line. */
+    it('does not repeat the narration for the same tool called twice in a row', async () => {
+      mockedStream.mockReturnValue(
+        streamOf([
+          { type: 'tool.started', tool: 'web_search', args: '{}' } as StreamEvent,
+          { type: 'tool.completed', tool: 'web_search', ok: true } as StreamEvent,
+          { type: 'tool.started', tool: 'web_search', args: '{}' } as StreamEvent,
+          { type: 'tool.completed', tool: 'web_search', ok: true } as StreamEvent,
+          { type: 'assistant.delta', text: 'Found it.' } as StreamEvent,
+          { type: 'run.completed', output: 'Found it.' } as StreamEvent,
+        ]),
+      );
+
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      const speak = ttsProvider.current?.speak as jest.Mock;
+      const spoken = speak.mock.calls.map(([text]) => String(text));
       const searching = spoken.filter((t) => t.includes('searching for that'));
-      const lookingUp = spoken.filter((t) => t.includes('looking that up'));
-      expect(searching.length + lookingUp.length).toBeLessThanOrEqual(1);
+      expect(searching.length).toBe(1);
     });
 
     /**

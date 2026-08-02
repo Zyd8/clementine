@@ -52,11 +52,15 @@ export function describeTool(tool: string): string {
   const name = tool.toLowerCase();
 
   if (/calendar|schedule|event/.test(name)) return 'checking the calendar';
+  // Checked before the generic browse/search line below: "browser_navigate"
+  // contains "browse" and would otherwise be misread as a search.
+  if (/navigate|goto|go_to|visit/.test(name)) return 'opening that page';
+  if (/terminal|bash|shell|command|exec|script/.test(name)) return 'running that command';
   if (/search|browse|web|fetch/.test(name)) return 'searching for that';
   if (/read|open|load/.test(name)) return 'looking that up';
   if (/write|save|create|edit|update/.test(name)) return 'saving that';
   if (/delete|remove/.test(name)) return 'cleaning that up';
-  if (/code|exec|run|script|shell|command/.test(name)) return 'running that';
+  if (/code|run/.test(name)) return 'running that';
   if (/calc|math|compute/.test(name)) return 'working that out';
   if (/memory|remember|recall/.test(name)) return 'checking what I remember';
   if (/image|photo|picture|vision/.test(name)) return 'taking a look';

@@ -4,10 +4,12 @@ describe('describeTool', () => {
   it.each([
     ['web_search', 'searching for that'],
     ['browse_url', 'searching for that'],
+    ['browser_navigate', 'opening that page'],
     ['read_file', 'looking that up'],
     ['write_file', 'saving that'],
     ['delete_file', 'cleaning that up'],
-    ['run_shell_command', 'running that'],
+    ['terminal', 'running that command'],
+    ['run_shell_command', 'running that command'],
     ['calculator', 'working that out'],
     ['memory_recall', 'checking what I remember'],
     ['vision_describe', 'taking a look'],
