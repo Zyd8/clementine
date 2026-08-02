@@ -55,6 +55,53 @@ describe('voice profile store', () => {
     expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   });
 
+  /**
+   * Phase 11's exit criterion. The existing tests cover the write and the
+   * read separately — this closes the loop through the store's own code, so
+   * a key entered once survives a restart.
+   */
+  it('round-trips an entered key through SecureStore', async () => {
+    await useVoiceProfileStore.getState().updateAsrConfig({
+      provider: 'groq',
+      apiKey: 'gsk_entered_by_hand',
+    });
+    await useVoiceProfileStore.getState().updateTtsConfig({
+      provider: 'elevenlabs',
+      apiKey: 'el_entered_by_hand',
+    });
+
+    // Wipe everything the running app holds, as a relaunch would.
+    reset();
+    await useVoiceProfileStore.getState().hydrate();
+
+    expect(useVoiceProfileStore.getState().asrConfig().apiKey).toBe(
+      'gsk_entered_by_hand',
+    );
+    expect(useVoiceProfileStore.getState().ttsConfig().apiKey).toBe(
+      'el_entered_by_hand',
+    );
+  });
+
+  /** Voice keys are the user's: SecureStore only, never the plain store. */
+  it('writes keys to SecureStore and nowhere else', async () => {
+    await useVoiceProfileStore.getState().updateAsrConfig({
+      provider: 'groq',
+      apiKey: 'gsk_secret',
+    });
+
+    const written = (SecureStore.setItemAsync as jest.Mock).mock.calls.at(-1);
+    expect(written?.[0]).toBe(VOICE_PROFILE_STORAGE_KEY);
+    expect(String(written?.[1])).toContain('gsk_secret');
+
+    const AsyncStorage = jest.requireMock(
+      '@react-native-async-storage/async-storage',
+    ) as { setItem?: jest.Mock };
+    const wroteToAsync = (AsyncStorage.setItem?.mock.calls ?? []).some(
+      ([, value]: [string, string]) => String(value).includes('gsk_secret'),
+    );
+    expect(wroteToAsync).toBe(false);
+  });
+
   it('hydrates a stored profile on boot', async () => {
     await SecureStore.setItemAsync(
       VOICE_PROFILE_STORAGE_KEY,

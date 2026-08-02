@@ -30,6 +30,31 @@ describe('Field', () => {
     expect(screen.getByLabelText('API KEY').props.secureTextEntry).toBe(true);
   });
 
+  /**
+   * Phase 11, decided 2026-08-02: hidden AND no copy-paste, always, not a
+   * toggle. `secureTextEntry` alone masks the glyphs but on Android a
+   * long-press still offers Copy, and autofill will happily suggest the key
+   * into other apps' fields. A provider key is agent access — it has to be
+   * enterable and unreadable.
+   */
+  it('blocks the context menu on a secret field so the key cannot be copied out', async () => {
+    await render(<Field label="ASR API Key" value="sk-secret" onChangeText={jest.fn()} secret />);
+    expect(screen.getByLabelText('ASR API Key').props.contextMenuHidden).toBe(true);
+  });
+
+  it('keeps a secret field out of autofill', async () => {
+    await render(<Field label="ASR API Key" value="sk-secret" onChangeText={jest.fn()} secret />);
+    const input = screen.getByLabelText('ASR API Key');
+    expect(input.props.autoComplete).toBe('off');
+    expect(input.props.textContentType).toBe('none');
+    expect(input.props.importantForAutofill).toBe('no');
+  });
+
+  it('leaves an ordinary field copyable — only secrets are locked down', async () => {
+    await render(<Field label="Server URL" value="http://x" onChangeText={jest.fn()} />);
+    expect(screen.getByLabelText('Server URL').props.contextMenuHidden).toBe(false);
+  });
+
   it('does not mask a normal field', async () => {
     await render(<Field label="SERVER URL" value="" onChangeText={jest.fn()} />);
     expect(screen.getByLabelText('SERVER URL').props.secureTextEntry).toBeFalsy();

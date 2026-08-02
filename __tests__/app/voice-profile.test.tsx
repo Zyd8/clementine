@@ -62,6 +62,78 @@ describe('VoiceProfileScreen', () => {
     expect(screen.getByText('minimax')).toBeTruthy();
   });
 
+  /**
+   * Phase 11's exit criterion: picking a voice asks for the key that voice
+   * needs, and does not ask when it needs none.
+   */
+  it.each(['groq', 'deepgram', 'openai'] as const)(
+    'asks for a key when %s is the picked ASR provider',
+    async (provider) => {
+      useVoiceProfileStore.setState({
+        profile: { ...useVoiceProfileStore.getState().profile, asr: { provider } },
+      });
+      await render(
+        <SafeAreaProvider initialMetrics={METRICS}>
+          <VoiceProfileScreen />
+        </SafeAreaProvider>,
+      );
+      expect(screen.getByText('ASR API Key')).toBeTruthy();
+    },
+  );
+
+  it.each(['elevenlabs', 'openai', 'minimax'] as const)(
+    'asks for a key when %s is the picked TTS provider',
+    async (provider) => {
+      useVoiceProfileStore.setState({
+        profile: { ...useVoiceProfileStore.getState().profile, tts: { provider } },
+      });
+      await render(
+        <SafeAreaProvider initialMetrics={METRICS}>
+          <VoiceProfileScreen />
+        </SafeAreaProvider>,
+      );
+      expect(screen.getByText('TTS API Key')).toBeTruthy();
+    },
+  );
+
+  /** The phone's own voice and Edge's free endpoint take no key. */
+  it.each(['device', 'edge'] as const)(
+    'asks for no key when %s is the picked TTS provider',
+    async (provider) => {
+      useVoiceProfileStore.setState({
+        profile: { ...useVoiceProfileStore.getState().profile, tts: { provider } },
+      });
+      await render(
+        <SafeAreaProvider initialMetrics={METRICS}>
+          <VoiceProfileScreen />
+        </SafeAreaProvider>,
+      );
+      expect(screen.queryByText('TTS API Key')).toBeNull();
+    },
+  );
+
+  it('masks the key fields and blocks copying them out', async () => {
+    useVoiceProfileStore.setState({
+      profile: {
+        ...useVoiceProfileStore.getState().profile,
+        asr: { provider: 'groq' },
+        tts: { provider: 'elevenlabs' },
+      },
+    });
+    await render(
+      <SafeAreaProvider initialMetrics={METRICS}>
+        <VoiceProfileScreen />
+      </SafeAreaProvider>,
+    );
+
+    for (const label of ['ASR API Key', 'TTS API Key']) {
+      const input = screen.getByLabelText(label);
+      expect(input.props.secureTextEntry).toBe(true);
+      expect(input.props.contextMenuHidden).toBe(true);
+      expect(input.props.importantForAutofill).toBe('no');
+    }
+  });
+
   /** Every ASR provider is a cloud service now, so all of them need a key. */
   it('shows the ASR API key field for groq', async () => {
     useVoiceProfileStore.setState({

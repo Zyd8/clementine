@@ -8,7 +8,11 @@ type FieldProps = {
   value: string;
   onChangeText: (value: string) => void;
   placeholder?: string;
-  /** Masks input — used for the API key, which is agent access. */
+  /**
+   * Masks input AND locks it down: no context menu, no autofill. Used for
+   * provider API keys, which are agent access. Not a toggle — a key must be
+   * enterable and unreadable, so the two always travel together.
+   */
   secret?: boolean;
   invalid?: boolean;
 };
@@ -46,6 +50,17 @@ export function Field({
         placeholder={placeholder}
         placeholderTextColor={theme.colors.inkMuted}
         secureTextEntry={Boolean(secret)}
+        // Masking hides the glyphs; these stop the key leaving the field.
+        // Android's long-press menu still offers Copy on a secureTextEntry
+        // input, and autofill will suggest a saved key into other apps.
+        contextMenuHidden={Boolean(secret)}
+        {...(secret
+          ? ({
+              autoComplete: 'off',
+              textContentType: 'none',
+              importantForAutofill: 'no',
+            } as const)
+          : {})}
         // URLs and keys are case- and character-exact; autocorrect is a bug source.
         autoCapitalize="none"
         autoCorrect={false}

@@ -16,6 +16,9 @@ import { useVoiceProfileStore } from '@/stores/voiceProfile';
 import type { AsrProviderConfig, TtsProviderConfig } from '@/types/voice';
 
 const ASR_PROVIDERS: AsrProviderConfig['provider'][] = ['groq', 'deepgram', 'openai'];
+
+/** Providers that need no key: the phone's own voice, and Edge's free endpoint. */
+const KEYLESS_TTS: TtsProviderConfig['provider'][] = ['device', 'edge'];
 const TTS_PROVIDERS: TtsProviderConfig['provider'][] = [
   'device',
   'edge',
@@ -256,8 +259,9 @@ export default function VoiceProfileScreen() {
         ))}
       </View>
 
-      {/* BYO TTS key — not needed for edge */}
-      {profile.tts.provider !== 'edge' && (
+      {/* BYO TTS key. `device` speaks through the phone's own engine and
+          `edge` is keyless, so neither prompts — everything else does. */}
+      {!KEYLESS_TTS.includes(profile.tts.provider) && (
         <>
           <Field
             label="TTS API Key"
