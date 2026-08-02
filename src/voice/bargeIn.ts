@@ -3,19 +3,28 @@
  * so the reply can be cut short the way a person stops when interrupted.
  *
  * Harder than end-of-speech detection, because the mic is open while the
- * speaker is playing and hears the agent's own voice. Two things guard
- * against the reply interrupting itself:
+ * speaker is playing and hears the agent's own voice. Without real echo
+ * cancellation on the device, the agent's own voice and the user's arrive at
+ * the same mic at the same loudness — no threshold tells them apart from
+ * level alone. Three things keep this usable anyway:
  *
  *   1. A bar measured against the echo itself. The reply's opening moments
  *      are almost never talked over, so the level during them IS the echo on
  *      this device at this volume — measure it and require speech to clear
  *      it. Guessing a fixed number cannot work: how much of the speaker the
  *      mic hears varies by phone, volume, and whether AEC exists at all.
- *   2. A sustain. A single loud frame is a door, a cough, or a syllable of
+ *   2. A grace window. The reply's own level is still settling in its first
+ *      few seconds — TTS ramping up, a device without hardware echo
+ *      cancellation still finding its footing — so nothing may fire yet. What
+ *      would have fired instead gets folded into the echo measurement,
+ *      raising the bar to match. The reply is not interruptible during this
+ *      window; that is the deliberate trade for a bar that has had time to
+ *      settle before it matters.
+ *   3. A sustain. A single loud frame is a door, a cough, or a syllable of
  *      echo that slipped through. Real speech holds.
  *
- * Both are deliberately conservative: failing to barge in costs a wait, while
- * a false barge-in cuts the agent off mid-sentence for no reason.
+ * All three are deliberately conservative: failing to barge in costs a wait,
+ * while a false barge-in cuts the agent off mid-sentence for no reason.
  */
 
 /** Never barge in below this, however quiet the room was measured to be. */
@@ -32,6 +41,14 @@ export const BARGE_IN_SUSTAIN = 3;
 export const BARGE_IN_CALIBRATION = 5;
 /** How far above the measured echo a voice has to be to count as barging in. */
 export const BARGE_IN_ECHO_MARGIN = 0.15;
+/**
+ * How long the reply is uninterruptible while the echo bar settles.
+ *
+ * Long enough that a device without real echo cancellation has time for its
+ * bar to converge before barge-in matters; short enough that a reply worth
+ * cutting off can still be cut off promptly once it does.
+ */
+export const BARGE_IN_GRACE_MS = 3000;
 /**
  * Ceiling on the measured bar.
  *
@@ -52,6 +69,8 @@ export type BargeInDetector = {
   threshold: () => number;
   /** True while still measuring the echo — nothing can fire yet. */
   calibrating: () => boolean;
+  /** True while the reply cannot yet be interrupted. */
+  inGrace: () => boolean;
 };
 
 /**
@@ -67,6 +86,8 @@ export function createBargeInDetector(
     calibration = BARGE_IN_CALIBRATION,
     echoMargin = BARGE_IN_ECHO_MARGIN,
     ceiling = BARGE_IN_CEILING,
+    graceMs = BARGE_IN_GRACE_MS,
+    now = () => Date.now(),
   }: {
     factor?: number;
     minLevel?: number;
@@ -74,10 +95,14 @@ export function createBargeInDetector(
     calibration?: number;
     echoMargin?: number;
     ceiling?: number;
+    graceMs?: number;
+    /** Injectable clock, so the grace window is testable without real time. */
+    now?: () => number;
   } = {},
 ): BargeInDetector {
   /** The floor before the echo has been heard. */
   const base = Math.max(minLevel, speechThreshold * factor);
+  const startedAt = now();
 
   let seen = 0;
   /** Loudest level heard while the reply plays and nobody is talking over it. */
@@ -112,6 +137,15 @@ export function createBargeInDetector(
       run += 1;
       if (run < sustain) return false;
 
+      if (now() - startedAt < graceMs) {
+        // Would otherwise fire, but the bar hasn't finished settling — bank
+        // it as echo instead, so a loud reply raises its own bar rather than
+        // being mistaken for the user once the window ends.
+        echoPeak = Math.max(echoPeak, level);
+        run = 0;
+        return false;
+      }
+
       fired = true;
       return true;
     },
@@ -123,5 +157,8 @@ export function createBargeInDetector(
     threshold,
 
     calibrating: (): boolean => seen < calibration,
+
+    /** True while the reply cannot yet be interrupted. */
+    inGrace: (): boolean => now() - startedAt < graceMs,
   };
 }
