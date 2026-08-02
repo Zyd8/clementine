@@ -4,7 +4,7 @@ import React from 'react';
 import { useSettingsStore } from '@/stores/settings';
 import { useVoiceProfileStore } from '@/stores/voiceProfile';
 
-import VoiceProfileScreen from './voice-profile';
+import VoiceProfileScreen from '../../app/voice-profile';
 
 beforeEach(() => {
   useSettingsStore.setState({ theme: 'dark' });

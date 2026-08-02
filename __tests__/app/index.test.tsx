@@ -4,7 +4,7 @@ import { render, screen, act } from '@testing-library/react-native';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
 
-import ChatScreen from './index';
+import ChatScreen from '../../app/index';
 
 jest.mock('react-native/Libraries/Utilities/useColorScheme', () => ({
   default: jest.fn(() => 'dark'),

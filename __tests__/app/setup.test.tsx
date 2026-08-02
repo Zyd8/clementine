@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react-native';
 
-import SetupScreen from './setup';
+import SetupScreen from '../../app/setup';
 
 // Mock useColorScheme so useTheme works without the native module
 jest.mock('react-native/Libraries/Utilities/useColorScheme', () => ({
