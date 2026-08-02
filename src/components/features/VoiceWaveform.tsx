@@ -10,10 +10,12 @@ type VoiceWaveformProps = {
   isActive: boolean;
   /** Test ID for testing. */
   testID?: string;
+  /** Five in the composer, six inside voice mode's ring, per the design. */
+  barCount?: number;
 };
 
-/** Number of bars in the waveform. */
-const BAR_COUNT = 5;
+/** Number of bars when the caller does not say. */
+const DEFAULT_BAR_COUNT = 5;
 
 /**
  * Audio level visualization — simple deterministically-sized bars
@@ -22,16 +24,21 @@ const BAR_COUNT = 5;
  * No native audio calls — pure prop-driven rendering so it works in tests
  * without expo-av or any audio package installed.
  */
-export function VoiceWaveform({ level, isActive, testID }: VoiceWaveformProps) {
+export function VoiceWaveform({
+  level,
+  isActive,
+  testID,
+  barCount = DEFAULT_BAR_COUNT,
+}: VoiceWaveformProps) {
   const theme = useTheme();
   const clampedLevel = Math.max(0, Math.min(1, level));
 
   return (
     <View style={styles.container} accessibilityLabel="Audio waveform" testID={testID}>
-      {Array.from({ length: BAR_COUNT }, (_, i) => {
+      {Array.from({ length: barCount }, (_, i) => {
         // Deterministic height from the level + bar index:
         // bars near the center grow more than outer bars.
-        const position = Math.abs(i - (BAR_COUNT - 1) / 2) / ((BAR_COUNT - 1) / 2);
+        const position = Math.abs(i - (barCount - 1) / 2) / ((barCount - 1) / 2);
         const barScale = isActive ? 0.2 + 0.8 * clampedLevel * (1 - position * 0.5) : 0.2;
         const height = Math.round(barScale * 40);
 

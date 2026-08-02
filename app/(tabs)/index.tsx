@@ -11,7 +11,6 @@ import { MicButton } from '@/components/ui/MicButton';
 import { useChat } from '@/hooks/useChat';
 import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
-import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { useBudgetStore } from '@/stores/budget';
 import { useChatStore, type FeedItem } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
@@ -40,7 +39,6 @@ export default function ChatScreen() {
   const isOverBudget = useBudgetStore((s) => s.isOverBudget);
 
   const { send, stop, isStreaming } = useChat(profileId);
-  const { voiceState, tapMic } = useVoiceChat(profileId);
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -347,10 +345,15 @@ export default function ChatScreen() {
             {isStreaming ? '■' : '➜'}
           </Text>
         </Pressable>
-        {/* Tap-to-talk. The hook owns the ASR/TTS lifecycle; this is the only
-            place it is reachable from. 46px per the design's composer row —
-            the 64px circle belongs to the full-screen voice overlay. */}
-        <MicButton voiceState={voiceState} onPress={tapMic} size={46} />
+        {/* Opens voice mode rather than recording here: `useVoiceChat` keeps
+            its machine in component state, so two mounted callers would run
+            two competing sessions. 46px per the design's composer row — the
+            64px circle belongs to the voice overlay. */}
+        <MicButton
+          voiceState="IDLE"
+          onPress={() => router.push('/voice')}
+          size={46}
+        />
       </View>
 
       <ProfilePicker
