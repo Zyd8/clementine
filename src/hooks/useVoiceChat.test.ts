@@ -1,6 +1,7 @@
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 
 import { createRun, PHONE_INSTRUCTIONS, stopRun, streamRunEvents, VOICE_INSTRUCTIONS } from '@/api/runs';
+import { listSessions } from '@/api/sessions';
 import { useChatStore } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
 import type { StreamEvent } from '@/types/events';
@@ -40,6 +41,10 @@ jest.mock('@/api/runs', () => ({
   streamRunEvents: jest.fn(),
 }));
 
+jest.mock('@/api/sessions', () => ({
+  listSessions: jest.fn(),
+}));
+
 // Mock TTS so we control when onSentenceEnd/onAllDone/onError fire
 const ttsCallbacks = { current: null as TtsCallbacks | null };
 const ttsProvider = { current: null as TtsProvider | null };
@@ -64,6 +69,7 @@ jest.mock('@/voice/tts', () => {
 const mockedCreateRun = createRun as jest.MockedFunction<typeof createRun>;
 const mockedStopRun = stopRun as jest.MockedFunction<typeof stopRun>;
 const mockedStream = streamRunEvents as jest.MockedFunction<typeof streamRunEvents>;
+const mockedListSessions = listSessions as jest.MockedFunction<typeof listSessions>;
 
 /** Turns a fixed list of events into the async iterable the hook consumes. */
 const streamOf = (events: StreamEvent[]) =>
@@ -105,6 +111,7 @@ beforeEach(() => {
   mockedCreateRun.mockResolvedValue({ runId: 'run_abc', status: 'started' });
   mockedStopRun.mockResolvedValue(undefined);
   mockedStream.mockReturnValue(streamOf([]));
+  mockedListSessions.mockResolvedValue({ sessions: [] });
   ttsCallbacks.current = null;
 });
 
@@ -1086,6 +1093,96 @@ describe('useVoiceChat', () => {
         result.current.leaveVoiceMode();
       }).not.toThrow();
       expect(result.current.voiceState).toBe('IDLE');
+    });
+  });
+
+  describe('session continuity with chat', () => {
+    /**
+     * Without this, a conversation started by typing and continued by voice
+     * (or the other way around) was two disconnected conversations — voice
+     * never passed a session id, so every voice turn spun up its own on the
+     * server, with none of the chat context.
+     */
+    it('continues chat’s session when one is already known', async () => {
+      useChatStore.getState().setSessionId(null, 'sess_from_chat');
+
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      expect(mockedCreateRun).toHaveBeenCalledWith(
+        'http://localhost:8642',
+        'test-key',
+        expect.objectContaining({ sessionId: 'sess_from_chat' }),
+      );
+    });
+
+    /** The session voice learns must be there for chat's next send too. */
+    it('learns the session after its first message, for chat to pick up next', async () => {
+      mockedListSessions.mockResolvedValue({
+        sessions: [
+          {
+            id: 'sess_from_voice',
+            title: 'x',
+            preview: '',
+            lastMessageAt: '2026-01-01T00:00:00Z',
+            messageCount: 1,
+          },
+        ],
+      });
+
+      const { result } = await renderHook(() => useVoiceChat());
+      await act(async () => {
+        await result.current.tapMic();
+      });
+      await act(async () => {
+        result.current.pushPartialTranscript('Test.');
+      });
+      await act(async () => {
+        await result.current.simulateEndOfSpeech();
+      });
+
+      expect(useChatStore.getState().sessionId(null)).toBe('sess_from_voice');
+    });
+  });
+
+  describe('taking over a run chat left running', () => {
+    /**
+     * Voice mode's own runs always clear `activeRun` in their own `finally`,
+     * so anything left there on mount is a run chat started that nobody
+     * stopped — chat has no idea voice mode exists. Left running, both
+     * streams wrote into the same feed at once, and there was no way back in
+     * chat to stop it either, since its run id had already been overwritten.
+     */
+    it('stops a run left running by chat when the screen opens', async () => {
+      useChatStore.getState().setActiveRun(null, 'run_from_chat');
+
+      await renderHook(() => useVoiceChat());
+
+      await waitFor(() => {
+        expect(mockedStopRun).toHaveBeenCalledWith(
+          'http://localhost:8642',
+          'test-key',
+          'run_from_chat',
+        );
+      });
+      expect(useChatStore.getState().activeRun(null)).toBeNull();
+    });
+
+    it('does nothing on mount when nothing was left running', async () => {
+      await renderHook(() => useVoiceChat());
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(mockedStopRun).not.toHaveBeenCalled();
     });
   });
 });

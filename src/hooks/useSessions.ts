@@ -84,7 +84,7 @@ export function useSessions(profileId: ProfileId = null) {
           sessionId,
         );
 
-        useChatStore.getState().hydrateFromMessages(profileId, messages);
+        useChatStore.getState().hydrateFromMessages(profileId, messages, sessionId);
         activeSessionId.current = sessionId;
       } catch (err) {
         const message = err instanceof ApiError ? err.message : 'Failed to load session.';

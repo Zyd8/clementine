@@ -42,6 +42,14 @@ type ProfileState = {
   feed: FeedItem[];
   usage: TokenUsage;
   activeRun: string | null;
+  /**
+   * The Hermes session every run continues, once known — shared between
+   * `useChat` and `useVoiceChat` so a conversation started by typing and
+   * continued by voice (or the other way around) is one conversation, not
+   * two disconnected ones. Neither hook owns this privately anymore; both
+   * read and write it here.
+   */
+  sessionId: string | null;
 };
 
 /**
@@ -58,6 +66,7 @@ const EMPTY_PROFILE: ProfileState = Object.freeze({
   feed: Object.freeze([] as FeedItem[]) as FeedItem[],
   usage: ZERO_USAGE,
   activeRun: null,
+  sessionId: null,
 });
 
 const emptyProfile = (): ProfileState => EMPTY_PROFILE;
@@ -70,9 +79,11 @@ type ChatState = {
   feed: (profileId: ProfileId) => FeedItem[];
   usage: (profileId: ProfileId) => TokenUsage;
   activeRun: (profileId: ProfileId) => string | null;
+  sessionId: (profileId: ProfileId) => string | null;
   appendUserMessage: (profileId: ProfileId, text: string) => void;
   applyEvent: (profileId: ProfileId, event: StreamEvent) => void;
   setActiveRun: (profileId: ProfileId, runId: string | null) => void;
+  setSessionId: (profileId: ProfileId, sessionId: string | null) => void;
   reconcileCompletion: (
     profileId: ProfileId,
     output: string,
@@ -80,7 +91,11 @@ type ChatState = {
   ) => void;
   reset: (profileId: ProfileId) => void;
   /** Replaces the feed with a session's saved history — see the action below. */
-  hydrateFromMessages: (profileId: ProfileId, messages: SessionMessage[]) => void;
+  hydrateFromMessages: (
+    profileId: ProfileId,
+    messages: SessionMessage[],
+    sessionId: string,
+  ) => void;
 };
 
 /** Closes any open streaming bubble. */
@@ -205,6 +220,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     feed: (profileId) => profile(profileId).feed,
     usage: (profileId) => profile(profileId).usage,
     activeRun: (profileId) => profile(profileId).activeRun,
+    sessionId: (profileId) => profile(profileId).sessionId,
 
     appendUserMessage: (profileId, text) =>
       update(profileId, (state) => ({
@@ -216,6 +232,9 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     setActiveRun: (profileId, runId) =>
       update(profileId, (state) => ({ ...state, activeRun: runId })),
+
+    setSessionId: (profileId, sessionId) =>
+      update(profileId, (state) => ({ ...state, sessionId })),
 
     /**
      * Repairs the feed after a stream drop, using the server's authoritative
@@ -246,9 +265,10 @@ export const useChatStore = create<ChatState>((set, get) => {
      * launch. Replaces whatever was there, same as `reset` followed by
      * replaying each message through the normal reducer paths.
      */
-    hydrateFromMessages: (profileId, messages) => {
+    hydrateFromMessages: (profileId, messages, sessionId) => {
       update(profileId, emptyProfile);
       const store = get();
+      store.setSessionId(profileId, sessionId);
       for (const msg of messages) {
         if (msg.role === 'user') {
           store.appendUserMessage(profileId, msg.content);

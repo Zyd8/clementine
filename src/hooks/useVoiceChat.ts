@@ -3,6 +3,7 @@ import { useAudioRecorder } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { createRun, PHONE_INSTRUCTIONS, stopRun, streamRunEvents, VOICE_INSTRUCTIONS } from '@/api/runs';
+import { listSessions } from '@/api/sessions';
 import { useChatStore, type ProfileId } from '@/stores/chat';
 import { useConnectionStore } from '@/stores/connection';
 import { useUsageStore } from '@/stores/usage';
@@ -94,6 +95,32 @@ export function useVoiceChat(profileId: ProfileId = null) {
   const noiseFloorRef = useRef<number | undefined>(undefined);
   const fullTranscript = useRef('');
 
+  // ---- Taking over the mic from a still-running chat turn ----
+
+  /**
+   * Voice mode's own runs always clear `activeRun` in their own `finally`
+   * (below), so anything left there when this mounts is a run chat started
+   * that nobody stopped — chat has no idea voice mode exists, so switching
+   * screens never stopped it. Left alone, it kept streaming into the same
+   * feed at the same time voice's own turn did, corrupting both: the reducer
+   * has no run-id awareness, so it settles whichever bubble happens to be
+   * open when either stream's `run.completed` arrives, and there was no way
+   * back in chat to stop it either, since `activeRun` had already been
+   * overwritten by voice's own run by then. Voice mode taking over always
+   * starts from a clean slate, the same way leaving it always fully stops
+   * (see `leaveVoiceMode`).
+   */
+  useEffect(() => {
+    if (!connection) return;
+    const staleRunId = useChatStore.getState().activeRun(profileId);
+    if (!staleRunId) return;
+    useChatStore.getState().setActiveRun(profileId, null);
+    void stopRun(connection.baseUrl, connection.apiKey, staleRunId).catch(() => undefined);
+    // Mount-only: this is a one-time handoff when the screen opens, not a
+    // recheck on every reconnect or profile switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ---- State transition helpers (update both React state and ref) ----
 
   const transition = useCallback((next: VoiceChatState) => {
@@ -137,12 +164,19 @@ export function useVoiceChat(profileId: ProfileId = null) {
       let runId: string | undefined;
 
       try {
+        // Continues whatever session chat is already in, and vice versa —
+        // shared with useChat through the store so a conversation started
+        // by typing and continued by voice is one conversation, not two
+        // disconnected ones.
+        const currentSessionId = store.sessionId(profileId);
+
         // Voice replies get their own instructions layered on top of the
         // standard phone ones — a reply built for reading is unlistenable
         // read aloud.
         const handle = await createRun(baseUrl, apiKey, {
           input,
           instructions: `${PHONE_INSTRUCTIONS} ${VOICE_INSTRUCTIONS}`,
+          ...(currentSessionId ? { sessionId: currentSessionId } : {}),
         });
         runId = handle.runId;
         store.setActiveRun(profileId, runId);
@@ -248,6 +282,22 @@ export function useVoiceChat(profileId: ProfileId = null) {
 
           if (event.type === 'run.completed' && event.usage) {
             useUsageStore.getState().addUsage(profileId, event.usage);
+          }
+        }
+
+        // First-ever message for this profile: nothing existed to continue,
+        // so nothing was known to pass above. Learn it now — from voice or
+        // from chat, either one is the next send's session from here on.
+        if (!currentSessionId) {
+          try {
+            const { sessions } = await listSessions(baseUrl, apiKey, {
+              limit: 1,
+              offset: 0,
+            });
+            if (sessions[0]) store.setSessionId(profileId, sessions[0].id);
+          } catch {
+            // Best-effort — a miss here just means the next message also
+            // starts its own session, same as before this existed.
           }
         }
 

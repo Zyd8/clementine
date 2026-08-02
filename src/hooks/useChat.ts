@@ -41,7 +41,6 @@ export function useChat(profileId: ProfileId = null) {
   // A ref, not state: `send` must see the current value synchronously to
   // reject a second submit in the same tick.
   const inFlight = useRef(false);
-  const sessionIdRef = useRef<string | null>(null);
   const resumeAttempted = useRef(false);
 
   // Best-effort: any failure here just leaves the chat starting fresh, the
@@ -70,8 +69,7 @@ export function useChat(profileId: ProfileId = null) {
         );
         if (cancelled) return;
 
-        useChatStore.getState().hydrateFromMessages(profileId, messages);
-        sessionIdRef.current = last.id;
+        useChatStore.getState().hydrateFromMessages(profileId, messages, last.id);
       } catch {
         // No prior session to resume, or the lookup failed — starts fresh.
       }
@@ -96,9 +94,10 @@ export function useChat(profileId: ProfileId = null) {
       let runId: string | undefined;
 
       try {
+        const currentSessionId = useChatStore.getState().sessionId(profileId);
         const handle = await createRun(baseUrl, apiKey, {
           input: text,
-          ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
+          ...(currentSessionId ? { sessionId: currentSessionId } : {}),
         });
         runId = handle.runId;
         store.setActiveRun(profileId, runId);
@@ -116,13 +115,13 @@ export function useChat(profileId: ProfileId = null) {
         // mount, so nothing is known to continue yet. Learn it now so every
         // send after this one lands in the same session instead of each one
         // spinning up its own.
-        if (!sessionIdRef.current) {
+        if (!useChatStore.getState().sessionId(profileId)) {
           try {
             const { sessions } = await listSessions(baseUrl, apiKey, {
               limit: 1,
               offset: 0,
             });
-            if (sessions[0]) sessionIdRef.current = sessions[0].id;
+            if (sessions[0]) store.setSessionId(profileId, sessions[0].id);
           } catch {
             // Best-effort — a miss here just means the next message also
             // starts its own session, same as before this existed.
