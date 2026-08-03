@@ -47,7 +47,12 @@ type WireSession = {
 
 type WireMessage = {
   role: string;
-  content: string;
+  // Hermes sends null here for a tool-only assistant turn — one that made
+  // tool calls but never produced reply text. The type elsewhere says
+  // `string` because nothing downstream (Bubble's `.trim()`, the sentence
+  // buffer) should have to think about the null case; `normalizeMessage`
+  // is where that gets resolved, once, at the wire boundary.
+  content: string | null;
   timestamp?: string;
   tool?: string;
   ok?: boolean;
@@ -68,7 +73,7 @@ function normalizeSession(w: WireSession): SessionSummary {
 function normalizeMessage(w: WireMessage): SessionMessage {
   return {
     role: w.role as SessionMessage['role'],
-    content: w.content,
+    content: w.content ?? '',
     ...(w.timestamp === undefined ? {} : { timestamp: w.timestamp }),
     ...(w.tool === undefined ? {} : { tool: w.tool }),
     ...(w.ok === undefined ? {} : { ok: w.ok }),

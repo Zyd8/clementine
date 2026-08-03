@@ -249,6 +249,26 @@ describe('getSessionMessages', () => {
     expect(result.messages[0]).toMatchObject({ role: 'user', content: 'hello' });
     expect(result.messages[2]).toMatchObject({ role: 'tool', tool: 'terminal', ok: true });
   });
+
+  /**
+   * The regression this guards: Hermes sends `content: null` for a
+   * tool-only assistant turn — one that made tool calls but never produced
+   * reply text. That null used to reach the feed as-is and crash
+   * `Bubble`'s `text.trim()` ("Cannot read property 'trim' of null") the
+   * moment a session with one of these in its history got resumed.
+   */
+  it('normalizes a null content (a tool-only assistant turn) to an empty string', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      json({
+        object: 'list',
+        session_id: 'sess_1',
+        data: [{ role: 'assistant', content: null, timestamp: '2026-08-01T12:00:00Z' }],
+      }),
+    ) as never;
+
+    const result = await getSessionMessages(BASE, KEY, 'sess_1');
+    expect(result.messages[0]?.content).toBe('');
+  });
 });
 
 describe('forkSession', () => {
