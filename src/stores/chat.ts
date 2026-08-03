@@ -90,6 +90,13 @@ type ChatState = {
     usage?: TokenUsage,
   ) => void;
   reset: (profileId: ProfileId) => void;
+  /**
+   * Every profile's feed and session, gone — not just the active one. Used
+   * when the connection itself changes: a profile's feed/session belongs to
+   * the Hermes instance that produced it, and switching instances must not
+   * leave the old one's conversation visible under the new one.
+   */
+  resetAll: () => void;
   /** Replaces the feed with a session's saved history — see the action below. */
   hydrateFromMessages: (
     profileId: ProfileId,
@@ -257,6 +264,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       ),
 
     reset: (profileId) => update(profileId, emptyProfile),
+
+    resetAll: () => set({ byProfile: {} }),
 
     /**
      * Loads a session's saved history as the feed — used to resume a

@@ -39,6 +39,14 @@ type ProfilesState = {
   setAvatar: (id: string, avatar: string) => Promise<void>;
   select: (id: string) => Promise<void>;
   hydrate: () => Promise<void>;
+  /**
+   * Back to just the implicit default profile — used when the connection
+   * itself changes. Profiles (and their avatars) are labels for accounts on
+   * ONE Hermes instance; without this, switching to a different instance
+   * kept showing the old instance's profile list and avatar, which reads as
+   * still being logged into the old account.
+   */
+  resetAll: () => Promise<void>;
 };
 
 /**
@@ -109,6 +117,11 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
       // to a feed nothing can write to; stay put instead.
       if (!get().profiles.some((p) => p.id === id)) return;
       set({ activeId: id });
+      await persist();
+    },
+
+    resetAll: async () => {
+      set({ profiles: [implicitProfile()], activeId: DEFAULT_PROFILE_ID });
       await persist();
     },
 

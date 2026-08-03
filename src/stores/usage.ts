@@ -21,6 +21,8 @@ type UsageState = {
   addUsage: (profileId: ProfileId, usage: TokenUsage) => void;
   total: (profileId: ProfileId) => TokenUsage;
   reset: (profileId: ProfileId) => void;
+  /** Every profile's running total, gone — see the chat store's resetAll. */
+  resetAll: () => void;
 };
 
 /**
@@ -65,6 +67,8 @@ export const useUsageStore = create<UsageState>()(
           const { [profileKey(profileId)]: _, ...rest } = state.byProfile;
           return { byProfile: rest };
         }),
+
+      resetAll: () => set({ byProfile: {} }),
     }),
     {
       name: 'clementine.usage',

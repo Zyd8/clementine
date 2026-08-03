@@ -10,6 +10,7 @@ import {
 
 import { Avatar } from '@/components/ui/Avatar';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { useDisconnect } from '@/hooks/useConnectionActions';
 import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { useTheme } from '@/hooks/useTheme';
 import { useConnectionStore } from '@/stores/connection';
@@ -31,7 +32,7 @@ export default function ProfilesScreen() {
   const screenRef = useRef<View>(null);
   const keyboardOverlap = useKeyboardOverlap(screenRef);
   const connection = useConnectionStore((s) => s.connection);
-  const disconnect = useConnectionStore((s) => s.disconnect);
+  const disconnect = useDisconnect();
 
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 

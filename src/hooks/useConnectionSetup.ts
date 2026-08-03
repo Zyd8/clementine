@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 
 import { validateConnection } from '@/api/capabilities';
 import { ApiError } from '@/api/client';
-import { useConnectionStore } from '@/stores/connection';
+import { useReconfigure } from '@/hooks/useConnectionActions';
 import { setupFormSchema, type SetupFormValues } from '@/types/connection';
 
 /**
@@ -20,6 +20,7 @@ const FALLBACK_ERROR = 'Something went wrong connecting. Check the URL and key, 
 export function useConnectionSetup() {
   const [status, setStatus] = useState<SetupStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const reconfigure = useReconfigure();
 
   const submit = useCallback(async (values: SetupFormValues): Promise<boolean> => {
     setError(null);
@@ -44,9 +45,10 @@ export function useConnectionSetup() {
       return false;
     }
 
-    // `reconfigure` wipes any prior credential before writing the new one;
-    // with no prior connection it is simply a connect.
-    await useConnectionStore.getState().reconfigure({
+    // `reconfigure` wipes any prior credential (and any prior instance's
+    // profiles/feed/usage) before writing the new one; with no prior
+    // connection it is simply a connect.
+    await reconfigure({
       ...(name ? { name } : {}),
       baseUrl,
       apiKey,
@@ -55,7 +57,7 @@ export function useConnectionSetup() {
 
     setStatus('success');
     return true;
-  }, []);
+  }, [reconfigure]);
 
   return { status, error, submit };
 }

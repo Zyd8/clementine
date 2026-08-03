@@ -40,9 +40,12 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
    * wiped *before* the new one is written, so a crash mid-swap can never
    * leave a half-replaced connection behind.
    *
-   * Phase 3/4 note: when session and profile stores land, their resets belong
-   * here (and in `disconnect`) — "wipes local session/profile state" is the
-   * documented contract, and today there is simply no such state to wipe.
+   * This store only owns the credential itself — profiles, the chat feed,
+   * and usage totals are separate stores that also need wiping on a real
+   * instance change (see `useDisconnect`/`useReconfigure` in
+   * `hooks/useConnectionActions.ts`, which is what the app actually calls).
+   * `stores/` may not depend on other `stores/` (see ARCHITECTURE.md's
+   * dependency direction), so that orchestration can't live here.
    */
   reconfigure: async (connection) => {
     await get().disconnect();
